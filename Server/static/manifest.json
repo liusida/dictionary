@@ -1,0 +1,21 @@
+{
+  "name": "Dictionary",
+  "short_name": "Dictionary",
+  "description": "A simple dictionary.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/static/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,250 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Dictionary</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#ffffff">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/icon.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icon512.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#FFFFFF">
+    <meta name="apple-mobile-web-app-title" content="Dictionary">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="main-container">
+
+        <form id="dict-form" autocomplete="off">
+            <input type="text" name="word" id="word-input" placeholder="Enter a word" required autofocus>
+            <input type="submit" value="Explain" id="explain-btn">
+            <div class="break"></div>
+            <div id="word-line">
+                <h3 id="word"></h3>
+                <button id="speak-btn" class="speaker-btn">
+                </button>
+            </div>
+
+        </form>
+
+        <div class="result">
+            <div id="explanation-row" class="explanation-row">
+                <span id="explanation"></span>
+                <button id="explanation-speak-btn" class="speaker-btn">
+                </button>
+            </div>
+
+            <div id="sample_sentence-row" class="sample_sentence-row">
+                <span id="sample_sentence"></span>
+                <button id="sentence-speak-btn" class="speaker-btn">
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="foot">Made With Love</div>
+
+    <script>
+        const form = document.getElementById("dict-form");
+        const wordInput = document.getElementById("word-input");
+        const resultDiv = document.querySelector(".result");
+        const wordLine = document.getElementById("word-line");
+        const wordElem = document.getElementById("word");
+        const explanationElem = document.getElementById("explanation");
+        const sampleElem = document.getElementById("sample_sentence");
+        const speakBtn = document.getElementById("speak-btn");
+        const explanationSpeakBtn = document.getElementById("explanation-speak-btn");
+        const sentenceSpeakBtn = document.getElementById("sentence-speak-btn");
+        const explainBtn = document.getElementById("explain-btn");
+
+        let audioPlayer = null;
+
+        function resetSpeakerButtons() {
+            document.querySelectorAll('.speaker-btn').forEach(btn => btn.classList.remove('loading'));
+        }
+
+        function resetWordInput() {
+            wordInput.value = ""; // Clear the input
+            wordInput.focus();
+            wordInput.select();
+
+        }
+
+        function playAudioForButton(btn, audioUrl) {
+            resetSpeakerButtons();
+            resetWordInput();
+            btn.classList.add("loading");
+
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0;
+            }
+
+            audioPlayer = new Audio(audioUrl);
+            audioPlayer.onended = function () {
+                btn.classList.remove("loading");
+            };
+            audioPlayer.onerror = function () {
+                btn.classList.remove("loading");
+            };
+
+            audioPlayer.play();
+        }
+
+
+        function pronounceWord() {
+            const word = wordElem.textContent.trim();
+            if (!word) return;
+            playAudioForButton(speakBtn, `/audio/${encodeURIComponent(word)}`);
+        }
+
+        form.onsubmit = async function (event) {
+            event.preventDefault();
+            const word = wordInput.value.trim();
+            if (!word) return;
+            explainBtn.classList.add("loading");
+            wordElem.textContent = '';
+            explanationElem.textContent = '';
+            sampleElem.innerHTML = '';
+            resultDiv.style.display = "none";
+            wordLine.style.display = "none";
+
+            const resp = await fetch("/lookup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ word })
+            });
+            const data = await resp.json();
+            if (data.word) {
+                resetWordInput();
+                wordElem.textContent = data.word;
+                resultDiv.style.display = "block";
+                wordLine.style.display = "flex";
+
+                const newUrl = `/word/${encodeURIComponent(data.word)}`;
+                window.history.replaceState({}, '', newUrl);
+
+                if (data.sample_sentence) {
+                    sampleElem.innerHTML = data.sample_sentence;
+                    sentenceSpeakBtn.style.display = 'inline-block';
+                    sentenceSpeakBtn.onclick = function (e) {
+                        const word = data.word;
+                        if (!word) return;
+                        playAudioForButton(sentenceSpeakBtn, `/audio/sample/${encodeURIComponent(word)}`);
+                        e.preventDefault();
+                    };
+                } else {
+                    sampleElem.innerHTML = '';
+                    sentenceSpeakBtn.style.display = 'none';
+                }
+
+                if (data.explanation) {
+                    explanationElem.textContent = data.explanation;
+                    explanationSpeakBtn.style.display = 'inline-block';
+                    explanationSpeakBtn.onclick = function (e) {
+                        if (!data.word) return;
+                        playAudioForButton(explanationSpeakBtn, `/audio/explanation/${encodeURIComponent(data.word)}`);
+                        e.preventDefault();
+                    };
+                } else {
+                    explanationSpeakBtn.style.display = 'none';
+                }
+
+
+            }
+            explainBtn.classList.remove("loading");
+        };
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === "F2" && wordElem.textContent) {
+                pronounceWord();
+                event.preventDefault();
+            }
+        });
+
+        speakBtn.addEventListener('click', function (e) {
+            pronounceWord();
+            e.preventDefault();
+        });
+
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Speaker Image
+            const speakerSVG = `
+            <svg width="15" height="15" viewBox="0 0 19 19">
+                <polygon points="1,9 7,9 11,5 11,19 7,15 1,15" fill="#888" />
+                <path d="M16 8 C18 10, 18 14, 16 16" stroke="#888" stroke-width="2" fill="none" />
+            </svg>
+            `;
+
+            document.querySelectorAll('.speaker-btn').forEach(btn => {
+                btn.innerHTML = speakerSVG;
+            });
+
+            const match = window.location.pathname.match(/^\/word\/(.+)$/);
+            const word = match ? decodeURIComponent(match[1]) : '';
+            if (word) {
+                // Optionally, only run this if explanation/sample_sentence are empty
+                if (!explanationElem.textContent) {
+                    wordInput.value = word;
+                    form.onsubmit(new Event('submit'));
+                }
+            }
+            // else: If no word, do nothing (show blank page)
+        });
+
+        resultDiv.addEventListener('click', function(e) {
+            let node = e.target;
+            // Ignore clicks on the speaker buttons
+            if (node.closest('.speaker-btn')) return;
+
+            // Only work for text nodes or inline elements (not on the button or container itself)
+            // Try to get the word at the click position
+            let range, offset;
+            if (document.caretRangeFromPoint) {
+                range = document.caretRangeFromPoint(e.clientX, e.clientY);
+            } else if (document.caretPositionFromPoint) {
+                let pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+                if (pos) {
+                    range = document.createRange();
+                    range.setStart(pos.offsetNode, pos.offset);
+                }
+            }
+            if (!range) return;
+            offset = range.startOffset;
+
+            let textNode = range.startContainer;
+            if (!textNode || textNode.nodeType !== 3) return; // only text nodes
+
+            let text = textNode.nodeValue;
+            if (!text) return;
+
+            // Find the word boundaries at the clicked position
+            let left = offset, right = offset;
+            while (left > 0 && /\w/.test(text[left-1])) left--;
+            while (right < text.length && /\w/.test(text[right])) right++;
+            let word = text.slice(left, right);
+            if (word) {
+                wordInput.value = word;
+                wordInput.focus();
+                wordInput.select();
+            }
+        });
+
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+    </script>
+    <script defer src="https://dict.liusida.com/umami/script.js" data-website-id="95cf6026-0cce-4b03-9c91-e69fdb4e3b62"></script>
+</body>
+
+</html>

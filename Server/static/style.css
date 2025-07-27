@@ -1,0 +1,228 @@
+body {
+  font-family: 'Georgia', 'Times New Roman', Times, serif;
+  background: #f5f6f8;
+  padding: 1em;
+  margin: 0;
+}
+
+/* Main card-like container */
+.main-container {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 1.5em;
+  align-items: stretch;
+}
+
+/* Flex break: force new line in flex layout */
+.main-container .break {
+  flex-basis: 100%;
+  width: 100%;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  margin-bottom: 0;
+}
+
+/* Style for word and pronounce button together */
+#word-line {
+  display: none;
+  align-items: center;
+  gap: 0.35em;
+  margin-top: 0.5em;
+}
+
+#word {
+  font-size: 1.3em;
+  color: #295fa6;
+  font-family: inherit;
+  font-weight: bold;
+  margin: 0;
+}
+
+.speaker-btn {
+  font-size: 1.1em;
+  padding: 0.08em 0.18em;   /* reduce button's inner space */
+  vertical-align: middle;
+  background: #f7fafc;
+  border: 1px solid #aac3e7;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #295fa6;
+  margin-left: 0.2em;
+  line-height: 1;           /* ensures vertical centering */
+  align-items: center;      /* vertical centering of SVG */
+  justify-content: center;
+
+}
+
+.speaker-btn.loading {
+  background: #e0a800;
+  /* Ubuntu orange, for visibility */
+  color: #fff;
+  cursor: wait;
+  opacity: 0.7;
+  position: relative;
+}
+
+/* Input and button styles */
+input[type="text"] {
+  flex: 1;
+  min-width: 100px;
+  padding: 0.55em;
+  font-size: 1.1em;
+  border-radius: 5px;
+  border: 1.5px solid #b5b7bb;
+  background: #fff;
+  font-family: inherit;
+  caret-color: #e4edf7; /* Use a light blue (or any light color you prefer) */
+
+}
+
+input[type="text"]::placeholder {
+  color: #cbdaef; /* Lighter, soft blue. Adjust as needed */
+  opacity: 1;     /* Ensure full opacity */
+}
+
+input[type="submit"] {
+  padding: 0.55em 1.3em;
+  font-size: 1em;
+  background: #fff;
+  color: #295fa6;
+  border: 2px solid #295fa6;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 500;
+  font-family: inherit;
+  transition: 
+    background 0.2s, 
+    color 0.2s;
+  letter-spacing: 0.02em;
+}
+
+input[type="submit"]:hover {
+  background: #295fa6;
+  color: #fff;
+}
+
+#explain-btn.loading {
+  background: #e0a800;
+  /* gold/yellow, for example */
+  color: #fff;
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* Result area */
+.result {
+  display: none;
+  /* margin-top: 1em; */
+}
+
+#explanation-row {
+  margin-top: 0;
+  font-size: 1.16em;
+  margin-bottom: 1.1em;
+  line-height: 1.8em;
+  color: #2d2b26;
+  border-left: 4px solid #aac3e7;
+  background: #d4e3f4;
+  padding: 0.65em 1em 0.65em 1em;
+  border-radius: 4px;
+}
+
+#sample_sentence-row {
+  font-size: 1.04em;
+  line-height: 1.4em;
+  color: #4d514d;
+  margin-bottom: 0;
+  padding-left: 0.3em;
+  font-family: 'Georgia', 'Times New Roman', Times, serif;
+  font-style: italic;
+}
+
+.highlight {
+  background: #def;
+  color: #222;
+  padding: 0 0.12em;
+  border-radius: 3px;
+  /* font-weight: bold; */
+}
+
+#foot {
+  display: none;
+  font-size: 0.8em;
+  color: #a5aab6;
+  margin-top: 5em;
+  text-align: center;
+  /* letter-spacing: 0.04em; */
+  user-select: none;
+  font-family: 'Times New Roman', Times, serif;
+}
+
+/* Responsive: horizontal layout if short window */
+@media (max-height: 350px) {
+  .main-container {
+    flex-direction: row;
+    gap: 2.5em;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  form {
+    flex: 0 0 180px;
+    max-width: 180px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1em;
+    margin-bottom: 0;
+  }
+
+  input[type="text"] {
+    width: 180px;
+  }
+
+  input[type="submit"] {
+    width: 200px;
+  }
+
+  .main-container .break {
+    display: none;
+  }
+
+  #word-line {
+    display: block !important;
+    margin-top: 3em;
+    width: 200px;
+    overflow-x: hidden;
+  }
+
+  #word {
+    display: block;
+    word-break: break-all;
+    margin-left: 0;
+  }
+  #speak-btn {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .result {
+    flex: 1 1 0%;
+    min-width: 0;
+    margin-left: 1.2em;
+    margin-top: 0;
+  }
+
+  #explanation {
+    margin-top: 0;
+  }
+}
