@@ -50,10 +50,11 @@ void setup() {
     k.init();
     // oled_print("Scan BLE...");
     // k.scanDevices(1);
-    oled_print("Connect BLE...");
+    oled_print("Connect Keyboard...");
     k.connectToFirstMatching("M7");
-
-    oled_print("Enter a word.");
+    if (k.isConnected()) {
+        oled_print("Enter a word.");
+    }
     m.lookupWord("apple"); // to warm up
     p.clear(); // clean the e-paper
 }
@@ -63,7 +64,11 @@ void loop() {
     if (!k.isConnected()) {
         oled_print("Connect Keyboard...");
         k.connectToFirstMatching("M7");
-        oled_print("");
+        if (k.isConnected()) {
+            oled_print("");
+        } else {
+            delay(1000);
+        }
     }
     // Keep-alive logic
     unsigned long currentMillis = millis();
@@ -87,8 +92,8 @@ void loop() {
 
             p.setWord(word);
             p.setExplanation(explanation);
-            p.setSampleSentence("");
-            // p.setSampleSentence(sample_sentence);
+            // p.setSampleSentence("");
+            p.setSampleSentence(sample_sentence);
             oled_print("...");
             p.draw();
             oled_print("");
