@@ -109,6 +109,7 @@ def lookup():
     })
 
 @app.route("/audio/<word>")
+@app.route("/audio/<word>.mp3")
 def generate_audio(word):
     audio_dir = os.path.join("static", "audio")
     audio_path = os.path.join(audio_dir, f"{word}.mp3")
