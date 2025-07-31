@@ -127,6 +127,7 @@ def generate_audio(word):
     return send_file(audio_path, mimetype="audio/mpeg")
 
 @app.route("/audio/sample/<word>")
+@app.route("/audio/sample/<word>.mp3")
 def generate_sample_audio(word):
     # Get the sample sentence from the cache/db
     with sqlite3.connect(DB_FILE) as conn:
@@ -153,6 +154,7 @@ def generate_sample_audio(word):
     return send_file(audio_path, mimetype="audio/mpeg")
 
 @app.route("/audio/explanation/<word>")
+@app.route("/audio/explanation/<word>.mp3")
 def generate_explanation_audio(word):
     # Get the explanation from the cache/db
     with sqlite3.connect(DB_FILE) as conn:
