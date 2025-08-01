@@ -20,6 +20,7 @@ void ManageKeyboard::init()
 {
     NimBLEDevice::init("ESP32-Host");
     NimBLEDevice::setSecurityAuth(true, true, true);  // bonding, MITM, secure
+    Device::init();
     log("BLE Initialized.");
 }
 
@@ -181,12 +182,15 @@ void ManageKeyboard::sendKeepAlive() {
 }
 
 void ManageKeyboard::onKeyNotify(NimBLERemoteCharacteristic *chr, uint8_t *pData, size_t length, bool isNotify) {
+    // Note: don't call complex functions in this callback. not enough resource and system would crash.
     if (length < 3) return;
 
     bool shift = (pData[0] & 0x22) != 0;
 
     for (int i = 2; i < 8; i++) {
         uint8_t keycode = pData[i];
+        // Serial0.print("Keycode pressed: 0x");
+        // Serial0.println(keycode, HEX);        
         if (keycode == 0) continue;
 
         if (keycode == 0x2A) {  // Backspace
@@ -203,6 +207,19 @@ void ManageKeyboard::onKeyNotify(NimBLERemoteCharacteristic *chr, uint8_t *pData
             continue;
         }
 
+        if (keycode == 0x3B) {  // F2
+            currentPlayingAudioType = AUDIO_WORD;
+            continue;
+        }
+        if (keycode == 0x3C) {  // F3
+            currentPlayingAudioType = AUDIO_EXPLANATION;
+            continue;
+        }
+        if (keycode == 0x3D) {  // F4
+            currentPlayingAudioType = AUDIO_SAMPLE;
+            continue;
+        }
+
         if (keycode < 128) {
             char c = shift ? shifted[keycode] : unshifted[keycode];
             if (c) {
@@ -211,6 +228,7 @@ void ManageKeyboard::onKeyNotify(NimBLERemoteCharacteristic *chr, uint8_t *pData
                     currentWord[len] = c;
                     currentWord[len + 1] = '\0';
                 }
+                beep();
                 oled_print(currentWord);
             }
         }

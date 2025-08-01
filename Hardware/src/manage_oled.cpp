@@ -23,6 +23,7 @@ void ManageOLED::init()
     u8g2.begin();
     u8g2.setFont(FONTS[0]);
     this->print("Initializing OLED...");
+    Device::init();
 }
 
 void ManageOLED::print(const char *str)

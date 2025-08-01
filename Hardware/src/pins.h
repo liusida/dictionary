@@ -12,4 +12,9 @@
 #define PIN_OLED_DC 17
 #define PIN_OLED_RST 13
 
+#define PIN_SOUND_SD    38
+#define PIN_SOUND_GAIN  39
+#define PIN_SOUND_DIN   40
+#define PIN_SOUND_BCLK  41
+#define PIN_SOUND_LRC   42
 #endif

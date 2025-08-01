@@ -5,8 +5,9 @@
 #include <NimBLEDevice.h>
 
 #include "loggable.h"
+#include "device.h"
 
-class ManageKeyboard : public Loggable
+class ManageKeyboard : public Loggable, public Device
 {
 public:
     ManageKeyboard(Stream *logOutput = nullptr);
