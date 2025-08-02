@@ -27,7 +27,7 @@ ManageNetwork network(&Serial);
 // ManageSound sound(&Serial);
 Audio audio;
 // Device 1: 23:11:13:13:00:0f | Name: M7
-volatile AudioType currentPlayingAudioType = AUDIO_NONE;
+volatile AudioType nextPlayingAudioType = AUDIO_NONE;
 
 volatile bool wordReady = false;
 char currentWord[256] = "";
@@ -58,7 +58,7 @@ void setup() {
     Serial.println("Init Sound...");
     // sound.init(PIN_SOUND_BCLK, PIN_SOUND_LRC, PIN_SOUND_DIN, PIN_SOUND_SD); // BCLK, RC/LRC, DIN
     audio.setPinout(PIN_SOUND_BCLK, PIN_SOUND_LRC, PIN_SOUND_DIN);
-    audio.setVolume(21); // default 0...21
+    audio.setVolume(18); // default 0...21
     audio.forceMono(true);
 
     oled_print("Search for Keyboard...");
@@ -123,17 +123,22 @@ void loop() {
             oled_print("...");
             epaper_display.draw();
             oled_print("");
-            // audio.stopSong();
-            // String url = "https://38.54.100.84/audio/explanation/" + String(word) + ".mp3";
-            // audio.connecttohost(url.c_str());
+            audio.stopSong();
+            String url = network.getAudioMp3URL( word, AUDIO_WORD );
+            audio.connecttohost(url.c_str());
+            nextPlayingAudioType = AUDIO_NONE;
         }
     }
-    if (currentPlayingAudioType != AUDIO_NONE) {
+    if (nextPlayingAudioType != AUDIO_NONE) {
         if (strlen(wordToLookup)>0 && network.isInitialized()) {
+            oled_print(">");
             audio.stopSong();
-            String url = network.getAudioMp3URL( wordToLookup, currentPlayingAudioType );
+            oled_print(">>");
+            String url = network.getAudioMp3URL( wordToLookup, nextPlayingAudioType );
+            oled_print(">>>");
             audio.connecttohost(url.c_str());
-            currentPlayingAudioType = AUDIO_NONE;
+            nextPlayingAudioType = AUDIO_NONE;
+            oled_print("");
         }    
     }
     audio.loop();

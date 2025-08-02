@@ -11,7 +11,7 @@ enum AudioType {
 extern volatile bool wordReady;
 extern char currentWord[256];
 extern char wordToLookup[256];
-extern volatile AudioType currentPlayingAudioType;
+extern volatile AudioType nextPlayingAudioType;
 
 void oled_print(const char* msg);
 void beep();

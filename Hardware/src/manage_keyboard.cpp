@@ -208,15 +208,15 @@ void ManageKeyboard::onKeyNotify(NimBLERemoteCharacteristic *chr, uint8_t *pData
         }
 
         if (keycode == 0x3B) {  // F2
-            currentPlayingAudioType = AUDIO_WORD;
+            nextPlayingAudioType = AUDIO_WORD;
             continue;
         }
         if (keycode == 0x3C) {  // F3
-            currentPlayingAudioType = AUDIO_EXPLANATION;
+            nextPlayingAudioType = AUDIO_EXPLANATION;
             continue;
         }
         if (keycode == 0x3D) {  // F4
-            currentPlayingAudioType = AUDIO_SAMPLE;
+            nextPlayingAudioType = AUDIO_SAMPLE;
             continue;
         }
 
