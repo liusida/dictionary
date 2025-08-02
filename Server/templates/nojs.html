@@ -7,33 +7,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 </head>
 <body>
+
     <div class="main-container">
 
-        <!-- Form still works (will reload page with ?word=xxx) -->
-        <form action="/" method="GET" autocomplete="off">
-            <input type="text" name="word" id="word-input" placeholder="Enter a word" value="{{ word or '' }}" required autofocus>
+        <form id="dict-form" autocomplete="off">
+            <input type="text" name="word" id="word-input" placeholder="Enter a word" required autofocus>
             <input type="submit" value="Explain" id="explain-btn">
+            <div class="break"></div>
+        {% if word %}
+            <div id="word-line">
+                <h3 id="word">{{ word }}</h3>
+                <!-- <button id="speak-btn" class="speaker-btn"> -->
+                </button>
+            </div>
+        {% endif %}
+
         </form>
 
-        {% if word %}
-        <div class="result" style="display:block; margin-top: 1em;">
-            <div id="word-line" style="display:flex; align-items:center;">
-                <h3 id="word">{{ word }}</h3>
-            </div>
-
+        <div class="result">
             {% if explanation %}
-            <div class="explanation-row" style="margin-top:0.5em;">
+            <div id="explanation-row" class="explanation-row">
                 <span id="explanation">{{ explanation }}</span>
+                <!-- <button id="explanation-speak-btn" class="speaker-btn"> -->
+                </button>
             </div>
             {% endif %}
 
             {% if sample_sentence %}
-            <div class="sample_sentence-row" style="margin-top:0.5em;">
+            <div id="sample_sentence-row" class="sample_sentence-row">
                 <span id="sample_sentence">{{ sample_sentence|safe }}</span>
+                <!-- <button id="sentence-speak-btn" class="speaker-btn"> -->
+                </button>
             </div>
             {% endif %}
         </div>
-        {% endif %}
     </div>
 
     <div id="foot">Made With Love</div>
