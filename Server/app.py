@@ -69,7 +69,8 @@ def query_openai(word):
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    word = request.args.get("word", "").strip().lower()
+    return render_template("index.html", word=word if word else None)
 
 @app.route("/word/<word>", methods=["GET"])
 def word_page(word):
