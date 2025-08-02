@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+    <title>Dictionary – {{ word }}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+</head>
+<body>
+    <div class="main-container">
+
+        <!-- Form still works (will reload page with ?word=xxx) -->
+        <form action="/" method="GET" autocomplete="off">
+            <input type="text" name="word" id="word-input" placeholder="Enter a word" value="{{ word or '' }}" required autofocus>
+            <input type="submit" value="Explain" id="explain-btn">
+        </form>
+
+        {% if word %}
+        <div class="result" style="display:block; margin-top: 1em;">
+            <div id="word-line" style="display:flex; align-items:center;">
+                <h3 id="word">{{ word }}</h3>
+            </div>
+
+            {% if explanation %}
+            <div class="explanation-row" style="margin-top:0.5em;">
+                <span id="explanation">{{ explanation }}</span>
+            </div>
+            {% endif %}
+
+            {% if sample_sentence %}
+            <div class="sample_sentence-row" style="margin-top:0.5em;">
+                <span id="sample_sentence">{{ sample_sentence|safe }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div id="foot">Made With Love</div>
+</body>
+</html>

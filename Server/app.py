@@ -70,7 +70,24 @@ def query_openai(word):
 @app.route("/", methods=["GET"])
 def index():
     word = request.args.get("word", "").strip().lower()
-    return render_template("index.html", word=word if word else None)
+
+    # If no word, just render normal page
+    if not word:
+        return render_template("index.html", word=None)
+
+    # Otherwise it'll be browser without javascript support
+    explanation, sample_sentence = get_cached_word(word)
+    if not explanation:
+        explanation, sample_sentence = query_openai(word)
+        if explanation:
+            set_cached_word(word, explanation, sample_sentence)
+
+    return render_template(
+        "nojs.html",
+        word=word,
+        explanation=explanation,
+        sample_sentence=sample_sentence,
+    )
 
 @app.route("/word/<word>", methods=["GET"])
 def word_page(word):
