@@ -15,7 +15,7 @@
             <input type="submit" value="Explain" id="explain-btn">
             <div class="break"></div>
         {% if word %}
-            <div id="word-line">
+            <div id="word-line" style="display: block;">
                 <h3 id="word">{{ word }}</h3>
                 <!-- <button id="speak-btn" class="speaker-btn"> -->
                 </button>
@@ -24,7 +24,8 @@
 
         </form>
 
-        <div class="result">
+        {% if explanation or sample_sentence %}
+        <div class="result" style="display: block;">
             {% if explanation %}
             <div id="explanation-row" class="explanation-row">
                 <span id="explanation">{{ explanation }}</span>
@@ -34,13 +35,14 @@
             {% endif %}
 
             {% if sample_sentence %}
-            <div id="sample_sentence-row" class="sample_sentence-row">
+            <div id="sample_sentence-row" class="sample_sentence-row" style="display: block;">
                 <span id="sample_sentence">{{ sample_sentence|safe }}</span>
                 <!-- <button id="sentence-speak-btn" class="speaker-btn"> -->
                 </button>
             </div>
             {% endif %}
         </div>
+        {% endif %}
     </div>
 
     <div id="foot">Made With Love for no js browser</div>
