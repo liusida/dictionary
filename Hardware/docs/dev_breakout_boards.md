@@ -5,6 +5,8 @@
 Shop: https://pingjia.taobao.com/858e7bcc229b486ed1618ff9aa3f57e9.html
         https://item.taobao.com/item.htm?id=724415068331
 
+![Photo](./images/ESP32-S3-N16R8-NoLogo-photo.jpg)
+
 ![Dimension](./images/ESP32-S3-N16R8-NoLogo.png)
 
 ![Schematics](./images/ESP32-S3-N16R8-NoLogo-sch.jpg)
