@@ -27,6 +27,8 @@ Datasheet: [despi-c02-datasheet](./specs/DESPI-C02.pdf)
 
 ![Photo](./images/DESPI-C02.png)
 
+![Photo Backside](./images/DESPI-C02-back.jpg)
+
 ![Schematics](./images/DESPI-C02-sch.png)
 
 ## 4. GoodDisplay E-Paper: GDEY042T81

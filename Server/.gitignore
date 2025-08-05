@@ -6,3 +6,4 @@ cache.db
 static/audio/*.mp3
 static/audio/explanations/*.mp3
 static/audio/samples/*.mp3
+tmp
