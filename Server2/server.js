@@ -229,8 +229,8 @@ app.post("/api/define", async (req, res) => {
     res.json(result);
     // Background audio
     generateAndCacheAudio(result.word).catch(() => {});
-    generateAndCacheAudio(result.explanation).catch(() => {});
-    generateAndCacheAudio(result.sentence).catch(() => {});
+    // generateAndCacheAudio(result.explanation).catch(() => {});
+    // generateAndCacheAudio(result.sentence).catch(() => {});
   } catch (e) {
     res.status(504).json({ error: "OpenAI API failed" });
   }
