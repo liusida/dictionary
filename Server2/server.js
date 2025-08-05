@@ -197,6 +197,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static('public'));
 
 // --- Serve cached audio (waits if not ready) ---
 app.get("/api/audio", async (req, res) => {
