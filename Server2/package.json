@@ -11,7 +11,7 @@
     "start": "cross-env NODE_ENV=production node server.js",
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build --outDir dist/client --ssrManifest",
-    "build:server": "vite build --outDir dist/server"
+    "build:server": "vite build --outDir dist/server --ssr client/entry-server.jsx"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
