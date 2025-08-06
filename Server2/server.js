@@ -169,7 +169,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
   }
 
   // Otherwise, request from OpenAI and wait
-  const prompt = `Explain the word "${trimmed}" simply for English learners and give a natural sample sentence using it. Respond in strict JSON: {"word": "...", "explanation": "...", "sentence": "..."}`;
+  const prompt = `Explain the word "${trimmed}" for English learners and give a natural sample sentence using it. Respond in strict JSON: {"word": "...", "explanation": "...", "sentence": "..."}`;
   return new Promise((resolve, reject) => {
     const pendingRequest = { res: null, word, resolve };
     if (!global.outgoingQueue) global.outgoingQueue = [];
