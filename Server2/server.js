@@ -14,7 +14,9 @@ const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
 const isProd = process.env.NODE_ENV === "production";
 
+const pendingRequests = new Map();
 const pendingResponses = new Map();
+
 const outgoingTTSRequests = new Map();
 
 let ws;
@@ -79,15 +81,27 @@ function handleWebSocketMessage(message) {
     ws.close();
     return;
   }
-  if (data.type === "response.created") {
-    const ctx = (global.outgoingQueue || []).shift();
-    if (!ctx) return;
-    pendingResponses.set(data.response.id, ctx);
+  // console.log(data);
+  // This block handles mapping response.id (from OpenAI) to our pending request
+  if (data.type === "response.created" && data.response && data.response.id) {
+    const openaiResponseId = data.response.id;
+    const request_id = data.response.metadata?.request_id;
+    const ctx = pendingRequests.get(request_id);
+    if (ctx) {
+      pendingRequests.delete(request_id);
+      pendingResponses.set(openaiResponseId, ctx);
+    }
+    // else: (handle if context not found)
+    console.warn("No pending context for request", request_id);
   }
+  // Match by metadata.request_id
   if (data.type === "response.text.done") {
     const { response_id, text } = data;
     const ctx = pendingResponses.get(response_id);
-    if (!ctx) return;
+    if (!ctx) {
+      console.warn("No pending context for response", response_id);
+      return;
+    }
     let word = "", region = "", explanation = "", sentence = "";
     try {
       const ai = JSON.parse(text);
@@ -97,7 +111,7 @@ function handleWebSocketMessage(message) {
       sentence = ai.sentence || "";
     } catch (e) {
       word = "error";
-      region = "--"
+      region = "--";
       explanation = text;
       sentence = "";
     }
@@ -162,7 +176,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
       const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
       return {
         word: cached.word,
-        region: result.region,
+        region: cached.region || "--",
         explanation: cached.explanation,
         sentence: cached.sentence,
       };
@@ -173,20 +187,26 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
 
   // Otherwise, request from OpenAI and wait
   const prompt = `Explain the word "${trimmed}" for English learners. Provide a natural example sentence using the word. Also, include a 2-letter regional code for where the word is mostly used (e.g., SG for Singapore, or "--" for globally standard English). Respond only in this strict JSON format: {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}`;
+  const request_id = crypto.randomUUID();
+
   return new Promise((resolve, reject) => {
-    const pendingRequest = { res: null, word, resolve };
-    if (!global.outgoingQueue) global.outgoingQueue = [];
-    global.outgoingQueue.push(pendingRequest);
+    pendingRequests.set(request_id, { resolve, reject, word: trimmed });
     ws.send(
       JSON.stringify({
         type: "response.create",
         response: {
           modalities: ["text"],
           instructions: prompt,
-        },
+          metadata: { request_id: request_id }
+        }
       })
     );
-    setTimeout(() => reject(new Error("OpenAI timeout")), 20000);
+    setTimeout(() => {
+      if (pendingRequests.has(request_id)) {
+        pendingRequests.delete(request_id);
+        reject(new Error("OpenAI timeout"));
+      }
+    }, 20000);
   });
 }
 
