@@ -226,10 +226,12 @@ app.get("/api/audio", async (req, res) => {
 app.post("/api/define", async (req, res) => {
   if (!req.session) return res.status(403).json({ error: "No session" });
   const { word, nocache } = req.body;
+  console.log(`[API] Define called for word: ${word} (nocache: ${nocache})`);
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
     const result = await getOrFetchWordData(word, { nocache });
+    console.log(`[API] Result for "${word}":`, result);
     res.json(result);
     // Background audio
     generateAndCacheAudio(result.word).catch(() => {});
