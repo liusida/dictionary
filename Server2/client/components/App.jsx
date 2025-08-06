@@ -170,7 +170,7 @@ export default function App() {
     const wordData = currentIdx >= 0 ? history[currentIdx] : null;
 
     return (
-        <div className="bg-gray-100 min-h-screen p-6 font-serif">
+        <div className="bg-transparent min-h-screen p-6 font-serif">
             <form className="flex gap-2 mb-5" onSubmit={handleSubmit}>
                 <input
                     ref={inputRef}
