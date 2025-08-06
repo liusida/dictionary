@@ -281,7 +281,11 @@ app.post("/lookup", async (req, res) => {
 
 // --- Serve static files / SSR ---
 if (isProd) {
-  app.use(express.static(path.join(__dirname, "dist/client")));
+// Serve static files, but NOT index.html!
+  app.use((req, res, next) => {
+    if (req.path === "/" || req.path.endsWith(".html")) return next();
+    express.static(path.join(__dirname, "dist/client"))(req, res, next);
+  });
   app.use("*", async (req, res) => {
     const template = fs.readFileSync(
       path.join(__dirname, "dist/client/index.html"),
