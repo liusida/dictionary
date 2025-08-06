@@ -2,7 +2,7 @@ import express from "express";
 import session from "express-session";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import crypto from "crypto";
 import "dotenv/config";
 import fetch from "node-fetch";
@@ -81,7 +81,6 @@ function handleWebSocketMessage(message) {
     ws.close();
     return;
   }
-  // console.log(data);
   // This block handles mapping response.id (from OpenAI) to our pending request
   if (data.type === "response.created" && data.response && data.response.id) {
     const openaiResponseId = data.response.id;
@@ -288,9 +287,10 @@ if (isProd) {
       path.join(__dirname, "dist/client/index.html"),
       "utf-8"
     );
-    const { render } = await import(
+    const entryServerFileUrl = pathToFileURL(
       path.join(__dirname, "dist/server/entry-server.js")
-    );
+    ).href;
+    const { render } = await import(entryServerFileUrl);
     const appHtml = render().html;
     const html = template.replace("<!--ssr-outlet-->", appHtml);
     res.status(200).set({ "Content-Type": "text/html" }).end(html);
@@ -308,9 +308,10 @@ if (isProd) {
         req.originalUrl,
         fs.readFileSync(path.join(__dirname, "index.html"), "utf-8")
       );
-      const { render } = await vite.ssrLoadModule(
+      const entryServerFileUrl = pathToFileURL(
         path.join(__dirname, "client/entry-server.jsx")
-      );
+      ).href;
+      const { render } = await vite.ssrLoadModule(entryServerFileUrl);
       const appHtml = render().html;
       const html = template.replace("<!--ssr-outlet-->", appHtml);
       res.status(200).set({ "Content-Type": "text/html" }).end(html);
