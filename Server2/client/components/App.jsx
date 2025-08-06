@@ -12,6 +12,29 @@ function AudioIcon({ playing }) {
     );
 }
 
+function SearchIcon({ active }) {
+    return (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <circle
+                cx="11"
+                cy="11"
+                r="7"
+                stroke={active ? "#f59e42" : "#A0AEC0"}
+                strokeWidth="2"
+            />
+            <line
+                x1="16"
+                y1="16"
+                x2="21"
+                y2="21"
+                stroke={active ? "#f59e42" : "#A0AEC0"}
+                strokeWidth="2"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+}
+
 function splitWordsAndSeparators(text) {
     // Splits into word, punctuation, and whitespace tokens
     return text.match(/\w+|[^\w\s]+|\s+/g) || [];
@@ -186,7 +209,7 @@ export default function App() {
                     disabled={loading}
                     className="text-lg px-4 py-2 rounded border-2 border-blue-800 text-blue-800 font-medium bg-white hover:bg-blue-50 disabled:opacity-60"
                 >
-                    {loading ? "..." : "Explain"}
+                    <SearchIcon active={loading} />
                 </button>
             </form>
 
