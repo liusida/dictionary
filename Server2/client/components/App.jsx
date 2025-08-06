@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import CountryFlag from "react-country-flag";
 
 function AudioIcon({ playing }) {
     return (
@@ -162,6 +163,7 @@ export default function App() {
 
             const newEntry = {
                 word: data.word,
+                region: data.region,
                 explanation: data.explanation,
                 sentence: data.sentence,
             };
@@ -201,6 +203,7 @@ export default function App() {
             // Replace the current entry with new data
             const newEntry = {
                 word: data.word,
+                region: data.region,
                 explanation: data.explanation,
                 sentence: data.sentence,
             };
@@ -264,6 +267,11 @@ export default function App() {
                                 }
                             />
                         </button>
+                        {wordData.region !== "--" && (
+                            <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
+                                <CountryFlag countryCode={wordData.region} svg style={{ width: "18px", height: "18px" }} />
+                            </span>
+                        )}
                     </div>
 
                     <div className="bg-blue-100 text-blue-900 rounded px-4 py-3 mb-4 flex justify-between items-start">

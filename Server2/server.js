@@ -88,18 +88,20 @@ function handleWebSocketMessage(message) {
     const { response_id, text } = data;
     const ctx = pendingResponses.get(response_id);
     if (!ctx) return;
-    let word = "", explanation = "", sentence = "";
+    let word = "", region = "", explanation = "", sentence = "";
     try {
       const ai = JSON.parse(text);
       word = ai.word || "";
+      region = ai.region || "--";
       explanation = ai.explanation || "";
       sentence = ai.sentence || "";
     } catch (e) {
       word = "error";
+      region = "--"
       explanation = text;
       sentence = "";
     }
-    const payload = { word, explanation, sentence };
+    const payload = { word, region, explanation, sentence };
     const cachePath = textCachePath(word.trim().toLowerCase());
     fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
     ctx.resolve && ctx.resolve(payload);
@@ -160,6 +162,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
       const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
       return {
         word: cached.word,
+        region: result.region,
         explanation: cached.explanation,
         sentence: cached.sentence,
       };
@@ -169,7 +172,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
   }
 
   // Otherwise, request from OpenAI and wait
-  const prompt = `Explain the word "${trimmed}" for English learners and give a natural sample sentence using it. Respond in strict JSON: {"word": "...", "explanation": "...", "sentence": "..."}`;
+  const prompt = `Explain the word "${trimmed}" for English learners. Provide a natural example sentence using the word. Also, include a 2-letter regional code for where the word is mostly used (e.g., SG for Singapore, or "--" for globally standard English). Respond only in this strict JSON format: {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}`;
   return new Promise((resolve, reject) => {
     const pendingRequest = { res: null, word, resolve };
     if (!global.outgoingQueue) global.outgoingQueue = [];
@@ -246,6 +249,7 @@ app.post("/lookup", async (req, res) => {
     const result = await getOrFetchWordData(word);
     res.json({
       word: result.word,
+      region: result.region,
       explanation: result.explanation,
       sample_sentence: result.sentence,
     });
