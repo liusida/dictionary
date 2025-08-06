@@ -35,6 +35,30 @@ function SearchIcon({ active }) {
     );
 }
 
+function ChevronIcon({ open }) {
+    return (
+        <svg
+            width="14"
+            height="14"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{
+                transition: "transform 0.2s",
+                transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+            }}
+        >
+            <polyline
+                points="6 8 10 12 14 8"
+                stroke={open ? "#f59e42" : "#A0AEC0"}
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </svg>
+    );
+}
+
 function splitWordsAndSeparators(text) {
     // Splits into word, punctuation, and whitespace tokens
     return text.match(/\w+|[^\w\s]+|\s+/g) || [];
@@ -48,6 +72,7 @@ export default function App() {
     const [history, setHistory] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(-1);
     const [playing, setPlaying] = useState({});
+    const [showHistoryPanel, setShowHistoryPanel] = useState(false);
     const inputRef = useRef(null);
     const currentAudioRef = useRef(null);
 
@@ -243,22 +268,25 @@ export default function App() {
 
                     <div className="bg-blue-100 text-blue-900 rounded px-4 py-3 mb-4 flex justify-between items-start">
                         <span>
-                            {splitWordsAndSeparators(wordData.explanation).map((part, i) =>
-                                /^\w+$/.test(part) ? (
-                                    <span
-                                        key={i}
-                                        className="cursor-pointer hover:underline hover:text-orange-500"
-                                        onClick={() => handleWordClick(part)}
-                                        tabIndex={0}
-                                        style={{ userSelect: "text" }}
-                                    >
-                                        {part}
-                                    </span>
-                                ) : (
-                                    part
-                                )
+                            {splitWordsAndSeparators(wordData.explanation).map(
+                                (part, i) =>
+                                    /^\w+$/.test(part) ? (
+                                        <span
+                                            key={i}
+                                            className="cursor-pointer hover:underline hover:text-orange-500"
+                                            onClick={() =>
+                                                handleWordClick(part)
+                                            }
+                                            tabIndex={0}
+                                            style={{ userSelect: "text" }}
+                                        >
+                                            {part}
+                                        </span>
+                                    ) : (
+                                        part
+                                    )
                             )}
-                        </span>                        
+                        </span>
                         <button
                             onClick={() =>
                                 handleAudioPlay(
@@ -282,38 +310,47 @@ export default function App() {
                     </div>
 
                     <div className="italic text-gray-600 flex items-center">
-                      <span>
-                          {splitWordsAndSeparators(wordData.sentence).map((part, i) => {
-                              // Highlight target word as before
-                              if (part.toLowerCase() === wordData.word.toLowerCase()) {
-                                  return (
-                                      <span
-                                          key={i}
-                                          className="bg-blue-50 px-1 rounded text-blue-800 font-medium cursor-pointer hover:underline"
-                                          onClick={() => handleWordClick(part)}
-                                          tabIndex={0}
-                                          style={{ userSelect: "text" }}
-                                      >
-                                          {part}
-                                      </span>
-                                  );
-                              } else if (/^\w+$/.test(part)) {
-                                  return (
-                                      <span
-                                          key={i}
-                                          className="cursor-pointer hover:underline hover:text-orange-500"
-                                          onClick={() => handleWordClick(part)}
-                                          tabIndex={0}
-                                          style={{ userSelect: "text" }}
-                                      >
-                                          {part}
-                                      </span>
-                                  );
-                              } else {
-                                  return part;
-                              }
-                          })}
-                      </span>
+                        <span>
+                            {splitWordsAndSeparators(wordData.sentence).map(
+                                (part, i) => {
+                                    // Highlight target word as before
+                                    if (
+                                        part.toLowerCase() ===
+                                        wordData.word.toLowerCase()
+                                    ) {
+                                        return (
+                                            <span
+                                                key={i}
+                                                className="bg-blue-50 px-1 rounded text-blue-800 font-medium cursor-pointer hover:underline"
+                                                onClick={() =>
+                                                    handleWordClick(part)
+                                                }
+                                                tabIndex={0}
+                                                style={{ userSelect: "text" }}
+                                            >
+                                                {part}
+                                            </span>
+                                        );
+                                    } else if (/^\w+$/.test(part)) {
+                                        return (
+                                            <span
+                                                key={i}
+                                                className="cursor-pointer hover:underline hover:text-orange-500"
+                                                onClick={() =>
+                                                    handleWordClick(part)
+                                                }
+                                                tabIndex={0}
+                                                style={{ userSelect: "text" }}
+                                            >
+                                                {part}
+                                            </span>
+                                        );
+                                    } else {
+                                        return part;
+                                    }
+                                }
+                            )}
+                        </span>
                         <button
                             onClick={() =>
                                 handleAudioPlay(
@@ -337,55 +374,65 @@ export default function App() {
                     </div>
                 </div>
             )}
+            <button
+                onClick={() => setShowHistoryPanel((v) => !v)}
+                className="flex items-center justify-center bg-white hover:bg-blue-50 mb-2 mt-8 transition"
+                aria-label="Show more controls"
+            >
+                <ChevronIcon open={showHistoryPanel} />
+            </button>
+            {showHistoryPanel && (
+                <div className="bg-gray-50 rounded-lg p-3 mt-1 mb-2 text-sm animate-fade-in">
+                    {history.length > 1 && (
+                        <div className="flex gap-2 mt-4 items-center justify-center">
+                            <button
+                                onClick={() =>
+                                    setCurrentIdx((idx) => Math.max(0, idx - 1))
+                                }
+                                disabled={currentIdx <= 0}
+                                className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
+                            >
+                                ← Previous
+                            </button>
+                            <button
+                                onClick={() =>
+                                    setCurrentIdx((idx) =>
+                                        Math.min(history.length - 1, idx + 1)
+                                    )
+                                }
+                                disabled={currentIdx >= history.length - 1}
+                                className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    )}
 
-            {history.length > 1 && (
-                <div className="flex gap-2 mt-4">
-                    <button
-                        onClick={() =>
-                            setCurrentIdx((idx) => Math.max(0, idx - 1))
-                        }
-                        disabled={currentIdx <= 0}
-                        className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
-                    >
-                        ← Previous
-                    </button>
-                    <button
-                        onClick={() =>
-                            setCurrentIdx((idx) =>
-                                Math.min(history.length - 1, idx + 1)
-                            )
-                        }
-                        disabled={currentIdx >= history.length - 1}
-                        className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
-                    >
-                        Next →
-                    </button>
-                </div>
-            )}
-
-            {history.length > 0 && (
-                <div className="flex flex-col gap-1 mt-3">
-                    <div className="text-xs text-gray-400">
-                        Showing {currentIdx + 1} of {history.length} words in
-                        history
-                    </div>
-                    <div className="flex">
-                      <button
-                          onClick={handleClearHistory}
-                          className="w-fit mt-1 px-2 py-0 rounded border border-red-300 text-red-300 bg-white text-xs hover:bg-red-30"
-                          type="button"
-                      >
-                          Clear History
-                      </button>
-                      <button
-                          onClick={handleRegenerate}
-                          className="w-fit mt-1 px-2 py-0 rounded border border-orange-400 text-orange-400 bg-white text-xs hover:bg-orange-50 ml-2"
-                          type="button"
-                          disabled={currentIdx < 0 || loading}
-                      >
-                          Regenerate
-                      </button>
-                    </div>
+                    {history.length > 0 && (
+                        <div className="flex flex-col gap-1 mt-3 items-center justify-center">
+                            <div className="text-xs text-gray-400">
+                                Showing {currentIdx + 1} of {history.length}{" "}
+                                words in history
+                            </div>
+                            <div className="flex">
+                                <button
+                                    onClick={handleClearHistory}
+                                    className="w-fit mt-1 px-2 py-0 rounded border border-red-300 text-red-300 bg-white text-xs hover:bg-red-30"
+                                    type="button"
+                                >
+                                    Clear History
+                                </button>
+                                <button
+                                    onClick={handleRegenerate}
+                                    className="w-fit mt-1 px-2 py-0 rounded border border-orange-400 text-orange-400 bg-white text-xs hover:bg-orange-50 ml-2"
+                                    type="button"
+                                    disabled={currentIdx < 0 || loading}
+                                >
+                                    Regenerate
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
