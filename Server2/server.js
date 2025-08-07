@@ -42,8 +42,9 @@ function connectWebSocket(sessionID) {
   });
   ws.on("close", (code, reason) => {
     console.warn(`WebSocket closed for session ${ws.sessionID}.`, "Code:", code, "Reason:", reason.toString());
-    console.log("Reconnecting...");
-    setTimeout(connectWebSocket, 1000, sessionID);
+    // skip auto-reconnect, if user visit another page, it'll reconnect.
+    // console.log("Reconnecting...");
+    // setTimeout(connectWebSocket, 1000, sessionID);
   });
   ws.on("message", (message) => handleWebSocketMessage(message, ws));
   return ws;
