@@ -16,7 +16,7 @@ const isProd = process.env.NODE_ENV === "production";
 
 const pendingRequests = new Map();
 const pendingResponses = new Map();
-
+const OpenAIWebsockets = new Map();
 const outgoingTTSRequests = new Map();
 
 let ws;
@@ -113,21 +113,22 @@ function handleWebSocketMessage(message) {
     ws.close();
     return;
   }
+
   // This block handles mapping response.id (from OpenAI) to our pending request
   if (data.type === "response.created" && data.response && data.response.id) {
     const openaiResponseId = data.response.id;
     const request_id = data.response.metadata?.request_id;
     const ctx = pendingRequests.get(request_id);
     if (ctx) {
-      console.log(`> delete ${request_id} because response has been created '${ctx.word}'`);
+      console.log(`> [${pendingRequests.size}] delete ${request_id} because response has been created '${ctx.word}'`);
       pendingRequests.delete(request_id);
-      console.log(`>> set ${openaiResponseId} for request ${request_id} '${ctx.word}'`);
+      console.log(`>> [${pendingResponses.size}] set ${openaiResponseId} for request ${request_id} '${ctx.word}'`);
       pendingResponses.set(openaiResponseId, ctx);
     } else {
       console.warn("No pending context for request", request_id);
     }
   }
-  // Match by metadata.request_id
+
   if (data.type === "response.text.done") {
     const { response_id, text } = data;
     const ctx = pendingResponses.get(response_id);
@@ -153,7 +154,7 @@ function handleWebSocketMessage(message) {
     fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
     ctx.resolve && ctx.resolve(payload);
     ctx.res && ctx.res.json(payload);
-    console.log(`>> delete ${response_id} after processing it.`);
+    console.log(`>> [${pendingResponses.size}] delete ${response_id} after processing it.`);
     pendingResponses.delete(response_id);
   }
 }
@@ -208,6 +209,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
   if (!nocache && fs.existsSync(cachePath)) {
     try {
       const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+      console.log(`Text-cache hit for '${trimmed}'.`);
       return {
         word: cached.word,
         region: cached.region || "--",
@@ -216,6 +218,7 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
       };
     } catch (e) {
       // Corrupt cache, ignore
+      console.warn(`The cache file for '${trimmed}' is corrupted, ignoring the cache. ${cachePath}`);
     }
   }
 
@@ -233,7 +236,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
   const request_id = crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
-    console.log(`> set ${request_id} for word '${trimmed}'`);
+    console.log(`> [${pendingRequests.size}] set ${request_id} for word '${trimmed}'`);
     pendingRequests.set(request_id, { resolve, reject, word: trimmed });
     console.log(`>>> send requset for '${trimmed}'`);
     ws.send(
@@ -248,7 +251,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
     );
     setTimeout(() => {
       if (pendingRequests.has(request_id)) {
-        console.log(`> deleting ${request_id} due to OpenAI timeout`);
+        console.log(`> [${pendingRequests.size}] deleting ${request_id} due to OpenAI timeout`);
         pendingRequests.delete(request_id);
         reject(new Error("OpenAI timeout"));
       }
@@ -279,6 +282,8 @@ app.get("/api/audio", async (req, res) => {
     } catch (err) {
       return res.status(500).end("Audio generation failed");
     }
+  } else {
+    console.log(`Audio-cache hit for '${text.slice(0, 30)}`);
   }
   if (fs.existsSync(cachePath)) {
     res.setHeader("Content-Type", "audio/mpeg");
@@ -290,6 +295,7 @@ app.get("/api/audio", async (req, res) => {
 
 // --- /api/define: For browser frontend, session required, supports nocache, triggers audio ---
 app.post("/api/define", async (req, res) => {
+  console.log(`API call from user session: ${req.sessionID}.`);
   if (!req.session) return res.status(403).json({ error: "No session" });
   const { word, nocache } = req.body;
   console.log(`[API] Define called for word: ${word} (nocache: ${nocache})`);
@@ -334,6 +340,7 @@ if (isProd) {
     express.static(path.join(__dirname, "dist/client"))(req, res, next);
   });
   app.use("*", async (req, res) => {
+    console.log(`New session started: ${req.sessionID}.`);
     const template = fs.readFileSync(
       path.join(__dirname, "dist/client/index.html"),
       "utf-8"
@@ -354,6 +361,7 @@ if (isProd) {
   });
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
+    console.log(`New session started: ${req.sessionID}.`);
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
