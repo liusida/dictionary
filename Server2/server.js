@@ -119,9 +119,9 @@ function handleWebSocketMessage(message) {
     const request_id = data.response.metadata?.request_id;
     const ctx = pendingRequests.get(request_id);
     if (ctx) {
-      console.log(`> delete ${request_id} because response has been created`);
+      console.log(`> delete ${request_id} because response has been created '${ctx.word}'`);
       pendingRequests.delete(request_id);
-      console.log(`>> set ${openaiResponseId} for request ${request_id} (${ctx.word})`);
+      console.log(`>> set ${openaiResponseId} for request ${request_id} '${ctx.word}'`);
       pendingResponses.set(openaiResponseId, ctx);
     } else {
       console.warn("No pending context for request", request_id);
@@ -233,8 +233,9 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
   const request_id = crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
-    console.log(`> set ${request_id} for word ${trimmed}`);
+    console.log(`> set ${request_id} for word '${trimmed}'`);
     pendingRequests.set(request_id, { resolve, reject, word: trimmed });
+    console.log(`>>> send requset for '${trimmed}'`);
     ws.send(
       JSON.stringify({
         type: "response.create",
