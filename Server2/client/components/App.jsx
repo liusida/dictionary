@@ -62,7 +62,7 @@ function ChevronIcon({ open }) {
 
 function splitWordsAndSeparators(text) {
     // Splits into word, punctuation, and whitespace tokens
-    return text.match(/\w+|[^\w\s]+|\s+/g) || [];
+    return text.match(/[\p{L}]+(?:-[\p{L}]+)*|[^\p{L}\s]+|\s+/gu)
 }
 
 const MAX_HISTORY = 256;
@@ -121,7 +121,7 @@ export default function App() {
     };
 
     function handleWordClick(word) {
-        if (!word || !/^\w+$/.test(word)) return;
+        // if (!word || !/^\w+$/.test(word)) return;
         setInput(word);
         inputRef.current?.focus();
     }
@@ -278,10 +278,10 @@ export default function App() {
                         <span>
                             {splitWordsAndSeparators(wordData.explanation).map(
                                 (part, i) =>
-                                    /^\w+$/.test(part) ? (
+                                    !/^[\s.,'";:!?-]+$/.test(part) ? (
                                         <span
                                             key={i}
-                                            className="cursor-pointer hover:underline hover:text-orange-500"
+                                            className="cursor-pointer hover:text-orange-500"
                                             onClick={() =>
                                                 handleWordClick(part)
                                             }
@@ -329,7 +329,7 @@ export default function App() {
                                         return (
                                             <span
                                                 key={i}
-                                                className="bg-blue-50 px-1 rounded text-blue-800 font-medium cursor-pointer hover:underline"
+                                                className="bg-blue-50 px-1 rounded text-blue-800 font-medium cursor-pointer"
                                                 onClick={() =>
                                                     handleWordClick(part)
                                                 }
@@ -339,11 +339,11 @@ export default function App() {
                                                 {part}
                                             </span>
                                         );
-                                    } else if (/^\w+$/.test(part)) {
+                                    } else if (!/^[\s.,'";:!?-]+$/.test(part)) {
                                         return (
                                             <span
                                                 key={i}
-                                                className="cursor-pointer hover:underline hover:text-orange-500"
+                                                className="cursor-pointer hover:text-orange-500"
                                                 onClick={() =>
                                                     handleWordClick(part)
                                                 }

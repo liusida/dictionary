@@ -36,6 +36,31 @@ function connectWebSocket() {
   ws.on("open", () => {
     console.log("Connected to OpenAI Realtime WebSocket.");
     wsConnecting = false;
+
+    const request_id = crypto.randomUUID();
+    pendingRequests.set(request_id, consoleCtx);
+    //send a instruction here:
+    const prompt = `You are a great explainer that explain words for the user. Here are the requiements for later explanation:
+    - "word": The dictionary or base form of the word (e.g., "go" for "went", "child" for "children", or same as "word" if already standard).
+    - "region": A 2-letter code indicating where the word is mostly used (e.g., "SG" for Singapore, or "--" for globally standard English).
+    - "explanation": A clear explanation in the style of Vocabulary.com. Use only simple and familiar words for basic vocabulary, but allow more detailed for the rest.
+    - "sentence": A natural example sentence using the word.
+    Respond ONLY with the strict JSON object, with NO code block, NO backticks, and NO extra content—just the raw JSON.
+    Now try the first word: 'apple'.
+    `
+
+    ws.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["text"],
+          instructions: prompt,
+          metadata: { request_id: request_id }
+        }
+      })
+    );
+    console.log("Initial instruction sent:", prompt);
+
   });
   ws.on("error", (err) => {
     console.error("WebSocket error:", err);
@@ -50,6 +75,17 @@ function connectWebSocket() {
   });
   ws.on("message", handleWebSocketMessage);
 }
+
+// Console as a context
+// Define a console context with a .res.json method that logs to the console
+const consoleCtx = {
+  res: {
+    json: (payload) => {
+      // Print with color or style if you want
+      console.log("\x1b[33m[AI Browser Console Response]\x1b[0m", payload);
+    }
+  }
+};
 
 // --- Cache Helpers ---
 function hashKey(str) {
@@ -78,6 +114,7 @@ function handleWebSocketMessage(message) {
   if (data.type === "error") {
     if (data.error.code === "session_expired") {
     }
+    console.error(data);
     ws.close();
     return;
   }
@@ -185,7 +222,11 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
   }
 
   // Otherwise, request from OpenAI and wait
-  const prompt = `Explain the word "${trimmed}" for English learners. Provide a natural example sentence using the word. Also, include a 2-letter regional code for where the word is mostly used (e.g., SG for Singapore, or "--" for globally standard English). Respond only in this strict JSON format: {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}`;
+  // const prompt = `Explain the word "${trimmed}" for English learners. Provide a natural example sentence using the word. Also, include a 2-letter regional code for where the word is mostly used (e.g., SG for Singapore, or "--" for globally standard English). Respond only in this strict JSON format: {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}`;
+  const prompt = `
+Explain the word "${trimmed}" in JSON format:
+{"word": "...", "region": "..", "explanation": "...", "sentence": "..."}
+`;
   const request_id = crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
@@ -253,7 +294,7 @@ app.post("/api/define", async (req, res) => {
     console.log(`[API] Result for "${word}":`, result);
     res.json(result);
     // Background audio
-    generateAndCacheAudio(result.word).catch(() => {});
+    generateAndCacheAudio(result.word).catch(() => { });
     // generateAndCacheAudio(result.explanation).catch(() => {});
     // generateAndCacheAudio(result.sentence).catch(() => {});
   } catch (e) {
@@ -281,7 +322,7 @@ app.post("/lookup", async (req, res) => {
 
 // --- Serve static files / SSR ---
 if (isProd) {
-// Serve static files, but NOT index.html!
+  // Serve static files, but NOT index.html!
   app.use((req, res, next) => {
     if (req.path === "/" || req.path.endsWith(".html")) return next();
     express.static(path.join(__dirname, "dist/client"))(req, res, next);
