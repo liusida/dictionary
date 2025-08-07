@@ -379,5 +379,5 @@ if (isProd) {
 
 let listen_host = "localhost";
 app.listen(port, listen_host, () => {
-  console.log(`\n\nServer running on http://${listen_host}:${port} (LAN accessible)`);
+  console.log(`====== Server running on http://${listen_host}:${port} (LAN accessible) ======`);
 });
