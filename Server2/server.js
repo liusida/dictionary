@@ -42,6 +42,7 @@ function connectWebSocket(sessionID) {
   });
   ws.on("close", (code, reason) => {
     console.warn(`WebSocket closed for session ${ws.sessionID}.`, "Code:", code, "Reason:", reason.toString());
+    OpenAIWebsockets.delete(ws.sessionID);
     // skip auto-reconnect, if user visit another page, it'll reconnect.
     // console.log("Reconnecting...");
     // setTimeout(connectWebSocket, 1000, sessionID);
@@ -274,7 +275,7 @@ app.get("/api/audio", async (req, res) => {
 });
 
 function getOrCreateWebSocket(sessionID) {
-  console.log(`getOrCreateWebSocket(${sessionID})`);
+  console.log(`getOrCreateWebSocket(${sessionID}), current map size before creation: ${OpenAIWebsockets.size}`);
   let ws = OpenAIWebsockets.get(sessionID);
   if (!ws || ws.readyState !== ws.OPEN) {
     ws = connectWebSocket(sessionID);
@@ -378,5 +379,5 @@ if (isProd) {
 
 let listen_host = "localhost";
 app.listen(port, listen_host, () => {
-  console.log(`Server running on http://${listen_host}:${port} (LAN accessible)`);
+  console.log(`\n\nServer running on http://${listen_host}:${port} (LAN accessible)`);
 });
