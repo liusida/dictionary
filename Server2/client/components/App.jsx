@@ -267,7 +267,7 @@ export default function App() {
                                 }
                             />
                         </button>
-                        {wordData.region !== "--" && (
+                        {wordData.region !== "--" && wordData.region.length ==2 && (
                             <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
                                 <CountryFlag countryCode={wordData.region} svg style={{ width: "18px", height: "18px" }} />
                             </span>
