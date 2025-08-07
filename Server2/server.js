@@ -119,11 +119,13 @@ function handleWebSocketMessage(message) {
     const request_id = data.response.metadata?.request_id;
     const ctx = pendingRequests.get(request_id);
     if (ctx) {
+      console.log(`> delete ${request_id} because response has been created`);
       pendingRequests.delete(request_id);
+      console.log(`>> set ${openaiResponseId} for request ${request_id} (${ctx.word})`);
       pendingResponses.set(openaiResponseId, ctx);
+    } else {
+      console.warn("No pending context for request", request_id);
     }
-    // else: (handle if context not found)
-    console.warn("No pending context for request", request_id);
   }
   // Match by metadata.request_id
   if (data.type === "response.text.done") {
@@ -151,6 +153,7 @@ function handleWebSocketMessage(message) {
     fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
     ctx.resolve && ctx.resolve(payload);
     ctx.res && ctx.res.json(payload);
+    console.log(`>> delete ${response_id} after processing it.`);
     pendingResponses.delete(response_id);
   }
 }
@@ -230,6 +233,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
   const request_id = crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
+    console.log(`> set ${request_id} for word ${trimmed}`);
     pendingRequests.set(request_id, { resolve, reject, word: trimmed });
     ws.send(
       JSON.stringify({
@@ -243,6 +247,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
     );
     setTimeout(() => {
       if (pendingRequests.has(request_id)) {
+        console.log(`> deleting ${request_id} due to OpenAI timeout`);
         pendingRequests.delete(request_id);
         reject(new Error("OpenAI timeout"));
       }
