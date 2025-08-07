@@ -19,11 +19,10 @@ const pendingResponses = new Map();
 const OpenAIWebsockets = new Map();
 const outgoingTTSRequests = new Map();
 
-let ws;
-let wsConnecting = false;
-
 // --- WebSocket Connection ---
-function connectWebSocket() {
+function connectWebSocket(sessionID) {
+  console.log(`Connect websocket for session ${sessionID}.`);
+  let ws;
   ws = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
     {
@@ -33,42 +32,21 @@ function connectWebSocket() {
       },
     }
   );
+  ws.sessionID = sessionID;
+  OpenAIWebsockets.set(sessionID, ws);
   ws.on("open", () => {
-    console.log("Connected to OpenAI Realtime WebSocket.");
-    wsConnecting = false;
-
-    // const request_id = crypto.randomUUID();
-    // pendingRequests.set(request_id, consoleCtx);
-    // //send a instruction here:
-    // const prompt = `You are a great explainer that explain words for the user. Here are the requiements for later explanation:
-    // Now try the first word: 'apple'.
-    // `
-
-    // ws.send(
-    //   JSON.stringify({
-    //     type: "response.create",
-    //     response: {
-    //       modalities: ["text"],
-    //       instructions: prompt,
-    //       metadata: { request_id: request_id }
-    //     }
-    //   })
-    // );
-    // console.log("Initial instruction sent:", prompt);
-
+    console.log(`Connected to OpenAI Realtime WebSocket for session ${ws.sessionID}.`);
   });
   ws.on("error", (err) => {
     console.error("WebSocket error:", err);
   });
   ws.on("close", (code, reason) => {
-    console.warn("WebSocket closed. Code:", code, "Reason:", reason.toString());
+    console.warn(`WebSocket closed for session ${ws.sessionID}.`, "Code:", code, "Reason:", reason.toString());
     console.log("Reconnecting...");
-    if (!wsConnecting) {
-      wsConnecting = true;
-      setTimeout(connectWebSocket, 1000);
-    }
+    setTimeout(connectWebSocket, 1000, sessionID);
   });
-  ws.on("message", handleWebSocketMessage);
+  ws.on("message", (message) => handleWebSocketMessage(message, ws));
+  return ws;
 }
 
 // Console as a context
@@ -98,7 +76,8 @@ function audioCachePath(text, voice = "nova") {
 }
 
 // --- WebSocket Message Handler ---
-function handleWebSocketMessage(message) {
+function handleWebSocketMessage(message, ws) {
+  // console.log(`handleWebSocketMessage for session ${ws.sessionID}`);
   let data;
   try {
     data = JSON.parse(message.toString());
@@ -202,7 +181,7 @@ async function generateAndCacheAudio(text, voice = "nova") {
 }
 
 // --- Core Helper: Get/Fetch Word Data ---
-async function getOrFetchWordData(word, { nocache = false } = {}) {
+async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
   const trimmed = word.trim().toLowerCase();
   const cachePath = textCachePath(trimmed);
   // Try cache first
@@ -238,7 +217,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
   return new Promise((resolve, reject) => {
     console.log(`> [${pendingRequests.size}] set ${request_id} for word '${trimmed}'`);
     pendingRequests.set(request_id, { resolve, reject, word: trimmed });
-    console.log(`>>> send requset for '${trimmed}'`);
+    console.log(`>>> send requset for '${trimmed}' for session ${ws.sessionID}`);
     ws.send(
       JSON.stringify({
         type: "response.create",
@@ -283,7 +262,7 @@ app.get("/api/audio", async (req, res) => {
       return res.status(500).end("Audio generation failed");
     }
   } else {
-    console.log(`Audio-cache hit for '${text.slice(0, 30)}`);
+    console.log(`Audio-cache hit for '${text.slice(0, 30)}'`);
   }
   if (fs.existsSync(cachePath)) {
     res.setHeader("Content-Type", "audio/mpeg");
@@ -292,6 +271,15 @@ app.get("/api/audio", async (req, res) => {
     res.status(500).end("Audio still not available");
   }
 });
+
+function getOrCreateWebSocket(sessionID) {
+  console.log(`getOrCreateWebSocket(${sessionID})`);
+  let ws = OpenAIWebsockets.get(sessionID);
+  if (!ws || ws.readyState !== ws.OPEN) {
+    ws = connectWebSocket(sessionID);
+  }
+  return ws;
+}
 
 // --- /api/define: For browser frontend, session required, supports nocache, triggers audio ---
 app.post("/api/define", async (req, res) => {
@@ -302,7 +290,8 @@ app.post("/api/define", async (req, res) => {
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
-    const result = await getOrFetchWordData(word, { nocache });
+    const ws = getOrCreateWebSocket(req.sessionID);
+    const result = await getOrFetchWordData(word, ws, { nocache });
     console.log(`[API] Result for "${word}":`, result);
     res.json(result);
     // Background audio
@@ -314,13 +303,16 @@ app.post("/api/define", async (req, res) => {
   }
 });
 
-// --- /lookup: For devices, no session, no audio ---
+// --- /lookup: For IoT devices ---
 app.post("/lookup", async (req, res) => {
+  //TODO: still have bug.
+  console.log(`/lookup from session ${req.sessionID}`);
+  const ws = getOrCreateWebSocket(req.sessionID);
   const { word } = req.body;
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
-    const result = await getOrFetchWordData(word);
+    const result = await getOrFetchWordData(word, ws);
     res.json({
       word: result.word,
       region: result.region,
@@ -340,7 +332,8 @@ if (isProd) {
     express.static(path.join(__dirname, "dist/client"))(req, res, next);
   });
   app.use("*", async (req, res) => {
-    console.log(`New session started: ${req.sessionID}.`);
+    console.log(`Page visit from session: ${req.sessionID}.`);
+    const ws = getOrCreateWebSocket(req.sessionID);
     const template = fs.readFileSync(
       path.join(__dirname, "dist/client/index.html"),
       "utf-8"
@@ -361,7 +354,8 @@ if (isProd) {
   });
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
-    console.log(`New session started: ${req.sessionID}.`);
+    console.log(`Page visit from session: ${req.sessionID}.`);
+    const ws = getOrCreateWebSocket(req.sessionID);
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
@@ -380,9 +374,6 @@ if (isProd) {
     }
   });
 }
-
-// --- Start OpenAI realtime API ws connection ---
-connectWebSocket();
 
 let listen_host = "localhost";
 app.listen(port, listen_host, () => {
