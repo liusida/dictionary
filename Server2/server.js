@@ -274,12 +274,37 @@ app.get("/api/audio", async (req, res) => {
   }
 });
 
-function getOrCreateWebSocket(sessionID) {
-  console.log(`getOrCreateWebSocket(${sessionID}), current map size before creation: ${OpenAIWebsockets.size}`);
+function waitForOpen(ws, timeoutMs = 5000) {
+  if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onOpen = () => cleanup(resolve);
+    const onErr  = (err) => cleanup(() => reject(err));
+    const onClose = () => cleanup(() => reject(new Error("WS closed before open")));
+    const timer = setTimeout(() => cleanup(() => reject(new Error("WS open timeout"))), timeoutMs);
+
+    function cleanup(cb) {
+      clearTimeout(timer);
+      ws.off("open", onOpen);
+      ws.off("error", onErr);
+      ws.off("close", onClose);
+      cb && cb();
+    }
+
+    ws.once("open", onOpen);
+    ws.once("error", onErr);
+    ws.once("close", onClose);
+  });
+}
+
+async function getOrCreateWebSocket(sessionID, timeoutMs = 5000) {
   let ws = OpenAIWebsockets.get(sessionID);
-  if (!ws || ws.readyState !== ws.OPEN) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    ws = connectWebSocket(sessionID);          // may be CONNECTING
+  }
+  if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
     ws = connectWebSocket(sessionID);
   }
+  await waitForOpen(ws, timeoutMs);
   return ws;
 }
 
@@ -292,7 +317,7 @@ app.post("/api/define", async (req, res) => {
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
-    const ws = getOrCreateWebSocket(req.sessionID);
+    const ws = await getOrCreateWebSocket(req.sessionID);
     const result = await getOrFetchWordData(word, ws, { nocache });
     console.log(`[API] Result for "${word}":`, result);
     res.json(result);
@@ -309,7 +334,7 @@ app.post("/api/define", async (req, res) => {
 app.post("/lookup", async (req, res) => {
   //TODO: still have bug.
   console.log(`/lookup from session ${req.sessionID}`);
-  const ws = getOrCreateWebSocket(req.sessionID);
+  const ws = await getOrCreateWebSocket(req.sessionID);
   const { word } = req.body;
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
@@ -335,7 +360,7 @@ if (isProd) {
   });
   app.get("/", async (req, res) => {
     console.log(`Page visit from session: ${req.sessionID}.`);
-    const ws = getOrCreateWebSocket(req.sessionID);
+    const ws = await getOrCreateWebSocket(req.sessionID);
     const template = fs.readFileSync(
       path.join(__dirname, "dist/client/index.html"),
       "utf-8"
@@ -357,7 +382,7 @@ if (isProd) {
   app.use(vite.middlewares);
   app.get("/", async (req, res, next) => {
     console.log(`Page visit from session: ${req.sessionID}.`);
-    const ws = getOrCreateWebSocket(req.sessionID);
+    const ws = await getOrCreateWebSocket(req.sessionID);
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
