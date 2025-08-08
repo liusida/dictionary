@@ -71,11 +71,19 @@ function textCachePath(word) {
   if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
   return path.join(folder, `${hashKey(word)}.json`);
 }
-function audioCachePath(text, voice = "nova") {
-  const folder = path.join(__dirname, "audio-cache");
-  if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
-  return path.join(folder, `${hashKey(text + voice)}.mp3`);
+
+function audioKey(word, type, voice = "nova") {
+  const w = String(word || "").trim().toLowerCase();
+  const t = String(type || "word").trim().toLowerCase();
+  const v = String(voice || "nova").trim().toLowerCase();
+  return `${w}||${t}||${v}||v1`;
 }
+function audioCachePathByKey(key) {
+  const folder = path.join(__dirname, "audio-cache-v2");
+  if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+  return path.join(folder, `${hashKey(key)}.mp3`);
+}
+
 
 // --- WebSocket Message Handler ---
 function handleWebSocketMessage(message, ws) {
@@ -141,14 +149,13 @@ function handleWebSocketMessage(message, ws) {
 }
 
 // --- Audio TTS Helper ---
-async function generateAndCacheAudio(text, voice = "nova") {
+async function generateAndCacheAudio({ key, text, voice = "nova" }) {
   if (!text) return;
-  const cachePath = audioCachePath(text, voice);
+  const cachePath = audioCachePathByKey(key);
   if (fs.existsSync(cachePath)) return;
-  const key = text + "::" + voice;
-  if (outgoingTTSRequests.has(key)) {
-    return outgoingTTSRequests.get(key);
-  }
+
+  if (outgoingTTSRequests.has(key)) return outgoingTTSRequests.get(key);
+  console.log(`OpenAI API call for generating audio '${text.slice(0, 20)}'`);
   const promise = (async () => {
     try {
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
@@ -164,11 +171,10 @@ async function generateAndCacheAudio(text, voice = "nova") {
           instructions: "",
         }),
       });
-      if (!response.ok || !response.body) {
-        throw new Error(`TTS failed: ${response.statusText}`);
-      }
+      if (!response.ok || !response.body) throw new Error(`TTS failed: ${response.statusText}`);
       await new Promise((resolve, reject) => {
         const dest = fs.createWriteStream(cachePath);
+        console.log(`audio generated '${text.slice(0, 20)}'`);
         response.body.pipe(dest);
         response.body.on("error", reject);
         dest.on("finish", resolve);
@@ -253,25 +259,73 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static('public'));
 
 // --- Serve cached audio (waits if not ready) ---
-app.get("/api/audio", async (req, res) => {
-  const { text, voice = "nova" } = req.query;
-  if (!text) return res.status(400).end("Missing text");
-  const cachePath = audioCachePath(text, voice);
-  if (!fs.existsSync(cachePath)) {
-    try {
-      await generateAndCacheAudio(text, voice);
-    } catch (err) {
-      return res.status(500).end("Audio generation failed");
-    }
-  } else {
-    console.log(`Audio-cache hit for '${text.slice(0, 30)}'`);
+// Shared handler for both POST /api/audio and GET /api/audio/stream
+async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }, res) {
+  // Validate
+  if (!wordInput || typeof wordInput !== "string" || wordInput.length > 64) {
+    return res.status(400).end("Invalid word");
   }
+  const word = wordInput.trim().toLowerCase();
+  const type = String(typeInput).trim().toLowerCase();
+  if (!["word", "explanation", "sample"].includes(type)) {
+    return res.status(400).end("Invalid type");
+  }
+
+  const voice = "nova";
+  const key = audioKey(word, type, voice);
+  const cachePath = audioCachePathByKey(key);
+
+  // Serve from cache if present
+  if (fs.existsSync(cachePath)) {
+    console.log(`Audio-cache hit for key '${key}'`);
+    res.setHeader("Content-Type", "audio/mpeg");
+    return fs.createReadStream(cachePath).pipe(res);
+  }
+
+  // Cache miss — decide text
+  let textToSpeak;
+  if (type === "word") {
+    textToSpeak = word;
+  } else {
+    try {
+      const ws = await getOrCreateWebSocket(sessionID);
+      const data = await getOrFetchWordData(word, ws);
+      textToSpeak = type === "explanation" ? (data.explanation || word)
+                                           : (data.sentence || word);
+    } catch {
+      return res.status(503).end("Definition unavailable");
+    }
+  }
+
+  // Generate then stream
+  try {
+    await generateAndCacheAudio({ key, text: textToSpeak, voice });
+  } catch {
+    return res.status(500).end("Audio generation failed");
+  }
+
   if (fs.existsSync(cachePath)) {
     res.setHeader("Content-Type", "audio/mpeg");
     fs.createReadStream(cachePath).pipe(res);
   } else {
     res.status(500).end("Audio still not available");
   }
+}
+
+// --- POST /api/audio (body: { word, type })
+app.post("/api/audio", async (req, res) => {
+  return ensureAndStreamAudio(
+    { wordInput: req.body?.word, typeInput: req.body?.type, sessionID: req.sessionID },
+    res
+  );
+});
+
+// --- GET /api/audio/stream?word=&type=
+app.get("/api/audio/stream", async (req, res) => {
+  return ensureAndStreamAudio(
+    { wordInput: req.query?.word, typeInput: req.query?.type, sessionID: req.sessionID },
+    res
+  );
 });
 
 function waitForOpen(ws, timeoutMs = 5000) {
@@ -321,10 +375,8 @@ app.post("/api/define", async (req, res) => {
     const result = await getOrFetchWordData(word, ws, { nocache });
     console.log(`[API] Result for "${word}":`, result);
     res.json(result);
-    // Background audio
-    generateAndCacheAudio(result.word).catch(() => { });
-    // generateAndCacheAudio(result.explanation).catch(() => {});
-    // generateAndCacheAudio(result.sentence).catch(() => {});
+    // Background audio cache for word
+    generateAndCacheAudio({key: audioKey(result.word, "word"), text: result.word}).catch(() => { });
   } catch (e) {
     res.status(504).json({ error: "OpenAI API failed" });
   }

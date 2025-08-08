@@ -2,6 +2,7 @@
 node_modules
 dist
 audio-cache
+audio-cache-*
 text-cache
 .vite
 .vscode

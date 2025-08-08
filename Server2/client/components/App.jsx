@@ -115,20 +115,37 @@ export default function App() {
         }
     }, [currentIdx, history]);
 
-    const handleAudioPlay = async (text, idx, field) => {
+    const handleAudioPlay = async (word, idx, field /* 'word' | 'explanation' | 'sentence' */) => {
         setPlaying({ field, idx });
+        // Map UI field name to server "type"
+        const type = field === "sentence" ? "sample" : field; // server expects: word | explanation | sample
         try {
-            const res = await fetch(
-                `/api/audio?text=${encodeURIComponent(text)}`
-            );
+            const res = await fetch("/api/audio", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ word, type }), // only send the word + type
+            });
             if (!res.ok) throw new Error("Audio not ready");
-            const url = res.url;
-            if (currentAudioRef.current) currentAudioRef.current.pause();
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+
+            if (currentAudioRef.current) {
+                currentAudioRef.current.pause();
+            }
             const audio = new Audio(url);
             currentAudioRef.current = audio;
+
+            audio.onended = () => {
+                setPlaying({});
+                URL.revokeObjectURL(url);
+            };
+            audio.onerror = () => {
+                setPlaying({});
+                URL.revokeObjectURL(url);
+            };
+
             audio.play();
-            audio.onended = () => setPlaying({});
-            audio.onerror = () => setPlaying({});
         } catch {
             setPlaying({});
             alert("Audio not available yet. Please try again soon.");
@@ -263,13 +280,7 @@ export default function App() {
                             {wordData.word}
                         </span>
                         <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.word,
-                                    currentIdx,
-                                    "word"
-                                )
-                            }
+                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "word")}
                             className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play word"
@@ -319,13 +330,7 @@ export default function App() {
                             )}
                         </span>
                         <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.explanation,
-                                    currentIdx,
-                                    "explanation"
-                                )
-                            }
+                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "explanation")}
                             className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play explanation"
@@ -383,13 +388,7 @@ export default function App() {
                             )}
                         </span>
                         <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.sentence,
-                                    currentIdx,
-                                    "sentence"
-                                )
-                            }
+                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "sentence")}
                             className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play sentence"
