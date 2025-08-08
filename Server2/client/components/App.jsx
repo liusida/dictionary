@@ -62,7 +62,7 @@ function ChevronIcon({ open }) {
 
 function splitWordsAndSeparators(text) {
     // Splits into word, punctuation, and whitespace tokens
-    return text.match(/[\p{L}]+(?:-[\p{L}]+)*|[^\p{L}\s]+|\s+/gu)
+    return text.match(/[\p{L}]+(?:-[\p{L}]+)*|[^\p{L}\s]+|\s+/gu);
 }
 
 const MAX_HISTORY = 256;
@@ -76,6 +76,21 @@ export default function App() {
     const [showHistoryPanel, setShowHistoryPanel] = useState(false);
     const inputRef = useRef(null);
     const currentAudioRef = useRef(null);
+
+    useEffect(() => {
+        const prewarm = async () => {
+            try {
+                await fetch("/api/prewarm", { method: "POST" });
+                console.log("Prewarm called.");
+            } catch (err) {
+                console.warn("Prewarm failed:", err);
+            }
+        };
+        window.addEventListener("focus", prewarm);
+        return () => {
+            window.removeEventListener("focus", prewarm);
+        };
+    }, []);
 
     useEffect(() => {
         setInput("");
@@ -267,11 +282,19 @@ export default function App() {
                                 }
                             />
                         </button>
-                        {wordData.region !== "--" && wordData.region.length ==2 && (
-                            <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
-                                <CountryFlag countryCode={wordData.region} svg style={{ width: "18px", height: "18px" }} />
-                            </span>
-                        )}
+                        {wordData.region !== "--" &&
+                            wordData.region.length == 2 && (
+                                <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
+                                    <CountryFlag
+                                        countryCode={wordData.region}
+                                        svg
+                                        style={{
+                                            width: "18px",
+                                            height: "18px",
+                                        }}
+                                    />
+                                </span>
+                            )}
                     </div>
 
                     <div className="bg-blue-100 text-blue-900 rounded px-4 py-3 mb-4 flex justify-between items-start">

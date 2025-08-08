@@ -351,6 +351,16 @@ app.post("/lookup", async (req, res) => {
   }
 });
 
+app.post("/api/prewarm", async (req, res) => {
+  console.log("prewarm");
+  try {
+    await getOrCreateWebSocket(req.sessionID); // ensures WS is open
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: "prewarm failed" });
+  }
+});
+
 // --- Serve static files / SSR ---
 if (isProd) {
   // Serve static files, but NOT index.html!
