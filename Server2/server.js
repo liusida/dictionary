@@ -362,6 +362,23 @@ async function getOrCreateWebSocket(sessionID, timeoutMs = 5000) {
   return ws;
 }
 
+function invalidateExplanationAndSample(word, voice = "nova") {
+  const w = String(word || "").trim().toLowerCase();
+  for (const t of ["explanation", "sample"]) {
+    const key = audioKey(w, t, voice);
+    const p = audioCachePathByKey(key);
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        console.log(`Audio cache invalidated: ${key}`);
+      }
+    } catch (e) {
+      console.warn(`Failed to remove audio cache ${p}:`, e.message);
+    }
+  }
+}
+
+
 // --- /api/define: For browser frontend, session required, supports nocache, triggers audio ---
 app.post("/api/define", async (req, res) => {
   console.log(`API call from user session: ${req.sessionID}.`);
@@ -375,6 +392,9 @@ app.post("/api/define", async (req, res) => {
     const result = await getOrFetchWordData(word, ws, { nocache });
     console.log(`[API] Result for "${word}":`, result);
     res.json(result);
+    if (nocache) {
+      invalidateExplanationAndSample(result.word);
+    }
     // Background audio cache for word
     generateAndCacheAudio({key: audioKey(result.word, "word"), text: result.word}).catch(() => { });
   } catch (e) {
