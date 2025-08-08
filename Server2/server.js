@@ -333,7 +333,7 @@ if (isProd) {
     if (req.path === "/" || req.path.endsWith(".html")) return next();
     express.static(path.join(__dirname, "dist/client"))(req, res, next);
   });
-  app.use("*", async (req, res) => {
+  app.get("/", async (req, res) => {
     console.log(`Page visit from session: ${req.sessionID}.`);
     const ws = getOrCreateWebSocket(req.sessionID);
     const template = fs.readFileSync(
@@ -355,7 +355,7 @@ if (isProd) {
     appType: "custom",
   });
   app.use(vite.middlewares);
-  app.use("*", async (req, res, next) => {
+  app.get("/", async (req, res, next) => {
     console.log(`Page visit from session: ${req.sessionID}.`);
     const ws = getOrCreateWebSocket(req.sessionID);
     try {
@@ -376,6 +376,11 @@ if (isProd) {
     }
   });
 }
+
+// --- 404 handler for everything else ---
+app.use((req, res) => {
+  res.status(404).send("Not Found");
+});
 
 let listen_host = "localhost";
 app.listen(port, listen_host, () => {
