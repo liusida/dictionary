@@ -81,24 +81,42 @@ export default function App() {
         const prewarm = async () => {
             try {
                 await fetch("/api/prewarm", { method: "POST" });
-                console.log("Prewarm called.");
-            } catch (err) {
-                console.warn("Prewarm failed:", err);
+            } catch (e) {
+                /* ignore */
             }
         };
-        const cooldown = async () => {
-            try {
-                await fetch("/api/cooldown", { method: "POST" });
-                console.log("Cooldown called.");
-            } catch (err) {
-                console.warn("Cooldown failed:", err);
+
+        const cooldown = () => {
+            // Most reliable during unload/background:
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon("/api/cooldown");
+            } else {
+                fetch("/api/cooldown", {
+                    method: "POST",
+                    keepalive: true,
+                }).catch(() => {});
             }
         };
+
+        // Open on focus (keeps your existing behavior)
         window.addEventListener("focus", prewarm);
+
+        // Fire when tab is hidden (switch tab, close tab, app background on mobile)
+        const onVisibility = () => {
+            if (document.visibilityState === "hidden") cooldown();
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+
+        // Fire on unload/back-forward cache transitions
+        window.addEventListener("pagehide", cooldown);
+
+        // (Optional) still listen to blur as a best-effort extra
         window.addEventListener("blur", cooldown);
 
         return () => {
             window.removeEventListener("focus", prewarm);
+            document.removeEventListener("visibilitychange", onVisibility);
+            window.removeEventListener("pagehide", cooldown);
             window.removeEventListener("blur", cooldown);
         };
     }, []);
@@ -126,7 +144,11 @@ export default function App() {
         }
     }, [currentIdx, history]);
 
-    const handleAudioPlay = async (word, idx, field /* 'word' | 'explanation' | 'sentence' */) => {
+    const handleAudioPlay = async (
+        word,
+        idx,
+        field /* 'word' | 'explanation' | 'sentence' */
+    ) => {
         setPlaying({ field, idx });
         // Map UI field name to server "type"
         const type = field === "sentence" ? "sample" : field; // server expects: word | explanation | sample
@@ -291,7 +313,13 @@ export default function App() {
                             {wordData.word}
                         </span>
                         <button
-                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "word")}
+                            onClick={() =>
+                                handleAudioPlay(
+                                    wordData.word,
+                                    currentIdx,
+                                    "word"
+                                )
+                            }
                             className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play word"
@@ -341,7 +369,13 @@ export default function App() {
                             )}
                         </span>
                         <button
-                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "explanation")}
+                            onClick={() =>
+                                handleAudioPlay(
+                                    wordData.word,
+                                    currentIdx,
+                                    "explanation"
+                                )
+                            }
                             className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play explanation"
@@ -399,7 +433,13 @@ export default function App() {
                             )}
                         </span>
                         <button
-                            onClick={() => handleAudioPlay(wordData.word, currentIdx, "sentence")}
+                            onClick={() =>
+                                handleAudioPlay(
+                                    wordData.word,
+                                    currentIdx,
+                                    "sentence"
+                                )
+                            }
                             className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border border-slate-300 bg-white hover:bg-orange-50"
                             type="button"
                             aria-label="Play sentence"
