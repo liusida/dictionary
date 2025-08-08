@@ -212,7 +212,7 @@ async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
   // Otherwise, request from OpenAI and wait
   // const prompt = `Explain the word "${trimmed}" for English learners. Provide a natural example sentence using the word. Also, include a 2-letter regional code for where the word is mostly used (e.g., SG for Singapore, or "--" for globally standard English). Respond only in this strict JSON format: {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}`;
   const prompt = `
-Explain the word "${trimmed}" in JSON format:
+Okay, now, explain this word/phrase "${trimmed}" in JSON format:
 {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}
 Requirement:
   - "word": The dictionary or base form of the word (e.g., "go" for "went", "child" for "children", or same as "word" if already standard).
