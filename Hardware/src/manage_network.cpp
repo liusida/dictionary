@@ -57,21 +57,33 @@ String ManageNetwork::lookupWord(const String& word) {
     return payload;
 }
 
+String urlencode(const char* str) {
+    String encoded = "";
+    char c;
+    char buf[4];
+    while ((c = *str++)) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded += c;
+        } else {
+            sprintf(buf, "%%%02X", (unsigned char)c);
+            encoded += buf;
+        }
+    }
+    return encoded;
+}
+
 String ManageNetwork::getAudioMp3URL(const char* word, AudioType type) const {
-    String url = String(baseURL) + "/audio/";
+    if (!word || !*word) return "";
+
+    String url = String(baseURL) + "/api/audio/stream?word=";
+    url += urlencode(word);                  // use the helper we added
+    url += "&type=";
+
     switch (type) {
-        case AUDIO_WORD:
-            url += String(word) + ".mp3";
-            break;
-        case AUDIO_EXPLANATION:
-            url += "explanation/" + String(word) + ".mp3";
-            break;
-        case AUDIO_SAMPLE:
-            url += "sample/" + String(word) + ".mp3";
-            break;
-        default:
-            url = "";
-            break;
+        case AUDIO_WORD:         url += "word"; break;
+        case AUDIO_EXPLANATION:  url += "explanation"; break;
+        case AUDIO_SAMPLE:       url += "sample"; break;
+        default:                 url += "word"; break;
     }
     return url;
 }
