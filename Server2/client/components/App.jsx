@@ -86,9 +86,20 @@ export default function App() {
                 console.warn("Prewarm failed:", err);
             }
         };
+        const cooldown = async () => {
+            try {
+                await fetch("/api/cooldown", { method: "POST" });
+                console.log("Cooldown called.");
+            } catch (err) {
+                console.warn("Cooldown failed:", err);
+            }
+        };
         window.addEventListener("focus", prewarm);
+        window.addEventListener("blur", cooldown);
+
         return () => {
             window.removeEventListener("focus", prewarm);
+            window.removeEventListener("blur", cooldown);
         };
     }, []);
 

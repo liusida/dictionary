@@ -291,7 +291,7 @@ async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }
       const ws = await getOrCreateWebSocket(sessionID);
       const data = await getOrFetchWordData(word, ws);
       textToSpeak = type === "explanation" ? (data.explanation || word)
-                                           : (data.sentence || word);
+        : (data.sentence || word);
     } catch {
       return res.status(503).end("Definition unavailable");
     }
@@ -332,7 +332,7 @@ function waitForOpen(ws, timeoutMs = 5000) {
   if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const onOpen = () => cleanup(resolve);
-    const onErr  = (err) => cleanup(() => reject(err));
+    const onErr = (err) => cleanup(() => reject(err));
     const onClose = () => cleanup(() => reject(new Error("WS closed before open")));
     const timer = setTimeout(() => cleanup(() => reject(new Error("WS open timeout"))), timeoutMs);
 
@@ -396,7 +396,7 @@ app.post("/api/define", async (req, res) => {
       invalidateExplanationAndSample(result.word);
     }
     // Background audio cache for word
-    generateAndCacheAudio({key: audioKey(result.word, "word"), text: result.word}).catch(() => { });
+    generateAndCacheAudio({ key: audioKey(result.word, "word"), text: result.word }).catch(() => { });
   } catch (e) {
     res.status(504).json({ error: "OpenAI API failed" });
   }
@@ -427,10 +427,26 @@ app.post("/api/prewarm", async (req, res) => {
   console.log("prewarm");
   try {
     await getOrCreateWebSocket(req.sessionID); // ensures WS is open
+    console.log(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
     res.json({ ok: true });
   } catch (e) {
     res.status(503).json({ ok: false, error: "prewarm failed" });
   }
+});
+
+app.post("/api/cooldown", (req, res) => {
+  console.log("cooldown");
+  const ws = OpenAIWebsockets.get(req.sessionID);
+  if (ws) {
+    try {
+      ws.close(1000, "cooldown");
+    } catch (err) {
+      console.warn("Cooldown close error:", err.message);
+    }
+    OpenAIWebsockets.delete(req.sessionID);
+  }
+  console.log(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
+  res.json({ ok: true });
 });
 
 // --- Serve static files / SSR ---
