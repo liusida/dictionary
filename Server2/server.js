@@ -18,6 +18,70 @@ const pendingRequests = new Map();
 const pendingResponses = new Map();
 const OpenAIWebsockets = new Map();
 const outgoingTTSRequests = new Map();
+const BeaconStates = new Map();
+
+function getBeaconState(sessionID) {
+  let s = BeaconStates.get(sessionID);
+  if (!s) {
+    s = { current: null, next: null, running: false };
+    BeaconStates.set(sessionID, s);
+  }
+  return s;
+}
+
+function scheduleBeacon(sessionID, kind) {
+  const s = getBeaconState(sessionID);
+  // Overwrite the next slot with the latest command
+  s.next = { kind, ts: Date.now() };
+  // Kick the processor (idempotent)
+  processBeacons(sessionID).catch((e) =>
+    console.warn(`Beacon processor error for ${sessionID}:`, e.message)
+  );
+}
+
+async function processBeacons(sessionID) {
+  const s = getBeaconState(sessionID);
+  if (s.running) return;
+  s.running = true;
+  try {
+    // Loop until no current and no next
+    while (true) {
+      if (!s.current) {
+        if (!s.next) break;
+        s.current = s.next;
+        s.next = null;
+      }
+
+      const b = s.current;
+      // Execute the current beacon
+      if (b.kind === "prewarm") {
+        try {
+          await getOrCreateWebSocket(sessionID); // already resilient
+        } catch (e) {
+          console.warn(`prewarm failed for ${sessionID}:`, e.message);
+        }
+      } else if (b.kind === "cooldown") {
+        const ws = OpenAIWebsockets.get(sessionID);
+        if (ws) {
+          try {
+            ws.close(1000, "cooldown");
+          } catch (err) {
+            console.warn("Cooldown close error:", err.message);
+          }
+          OpenAIWebsockets.delete(sessionID);
+        }
+      } else {
+        console.warn("Unknown beacon kind:", b.kind);
+      }
+
+      // Done with current; allow promotion of any queued next
+      s.current = null;
+      // loop will promote s.next if present
+    }
+  } finally {
+    s.running = false;
+  }
+}
 
 // --- WebSocket Connection ---
 function connectWebSocket(sessionID) {
@@ -423,30 +487,18 @@ app.post("/lookup", async (req, res) => {
   }
 });
 
-app.post("/api/prewarm", async (req, res) => {
+app.post("/api/prewarm", (req, res) => {
   console.log("prewarm");
-  try {
-    await getOrCreateWebSocket(req.sessionID); // ensures WS is open
-    console.log(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(503).json({ ok: false, error: "prewarm failed" });
-  }
+  scheduleBeacon(req.sessionID, "prewarm");
+  console.log(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
+  res.status(202).json({ ok: true, queued: "prewarm" });
 });
 
 app.post("/api/cooldown", (req, res) => {
   console.log("cooldown");
-  const ws = OpenAIWebsockets.get(req.sessionID);
-  if (ws) {
-    try {
-      ws.close(1000, "cooldown");
-    } catch (err) {
-      console.warn("Cooldown close error:", err.message);
-    }
-    OpenAIWebsockets.delete(req.sessionID);
-  }
+  scheduleBeacon(req.sessionID, "cooldown");
   console.log(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
-  res.json({ ok: true });
+  res.status(202).json({ ok: true, queued: "cooldown" });
 });
 
 // --- Serve static files / SSR ---
