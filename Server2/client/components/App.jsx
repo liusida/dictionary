@@ -78,46 +78,33 @@ export default function App() {
     const currentAudioRef = useRef(null);
 
     useEffect(() => {
-        const prewarm = async () => {
-            try {
-                await fetch("/api/prewarm", { method: "POST" });
-            } catch (e) {
-                /* ignore */
-            }
-        };
+        const prewarm = () =>
+            navigator.sendBeacon("/api/prewarm");
 
-        const cooldown = () => {
-            // Most reliable during unload/background:
-            if (navigator.sendBeacon) {
-                navigator.sendBeacon("/api/cooldown");
-            } else {
-                fetch("/api/cooldown", {
-                    method: "POST",
-                    keepalive: true,
-                }).catch(() => {});
-            }
-        };
+        const cooldown = () => 
+            navigator.sendBeacon("/api/cooldown");
 
         // Open on focus (keeps your existing behavior)
-        window.addEventListener("focus", prewarm);
+        prewarm();
+        window.addEventListener("pageshow", prewarm); // fires on F5 and BFCache restore
+        window.addEventListener("focus", prewarm); // re-focus on the window
 
         // Fire when tab is hidden (switch tab, close tab, app background on mobile)
         const onVisibility = () => {
             if (document.visibilityState === "hidden") cooldown();
+            if (document.visibilityState === "visible") prewarm();
         };
         document.addEventListener("visibilitychange", onVisibility);
 
         // Fire on unload/back-forward cache transitions
         window.addEventListener("pagehide", cooldown);
 
-        // (Optional) still listen to blur as a best-effort extra
-        window.addEventListener("blur", cooldown);
-
         return () => {
+            window.removeEventListener("pageshow", prewarm);
             window.removeEventListener("focus", prewarm);
-            document.removeEventListener("visibilitychange", onVisibility);
+            document.removeEventListener("visibilitychange", prewarm);
+            document.removeEventListener("visibilitychange", cooldown);
             window.removeEventListener("pagehide", cooldown);
-            window.removeEventListener("blur", cooldown);
         };
     }, []);
 
