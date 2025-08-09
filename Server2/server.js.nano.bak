@@ -1,0 +1,365 @@
+// server.js — stateless chat.completions (gpt-5-nano) with debug logs + keep-alive
+
+import express from "express";
+import session from "express-session";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import crypto from "crypto";
+import "dotenv/config";
+import fetch from "node-fetch";
+import https from "https";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const port = process.env.PORT || 3000;
+const apiKey = process.env.OPENAI_API_KEY;
+const isProd = process.env.NODE_ENV === "production";
+
+// ---------- helpers ----------
+const hashKey = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
+const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
+const now = () => new Date().toISOString();
+const t0 = () => process.hrtime.bigint();
+const ms = (start) => Number((process.hrtime.bigint() - start) / 1000000n);
+
+function dbg(...args) { console.log(`[${now()}]`, ...args); }
+function warn(...args) { console.warn(`[${now()}]`, ...args); }
+function err(...args) { console.error(`[${now()}]`, ...args); }
+
+// ---------- caches ----------
+const textCacheDir = path.join(__dirname, "text-cache");
+const audioCacheDir = path.join(__dirname, "audio-cache-v2");
+ensureDir(textCacheDir);
+ensureDir(audioCacheDir);
+
+const textCachePath = (input) => path.join(textCacheDir, `${hashKey(input)}.json`);
+const audioKey = (word, type, voice = "nova") =>
+  `${String(word).trim().toLowerCase()}||${String(type).trim().toLowerCase()}||${String(voice).trim().toLowerCase()}||v1`;
+const audioCachePathByKey = (key) => path.join(audioCacheDir, `${hashKey(key)}.mp3`);
+const outgoingTTSRequests = new Map();
+
+// ---------- keep-alive agent ----------
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 100,
+  maxFreeSockets: 20,
+  timeout: 60_000
+});
+
+// ---------- OpenAI ----------
+async function openaiChatJSON(target) {
+  const system = `You are a dictionary helper. Return ONLY a raw JSON object.`;
+  const user = `
+Explain this word/phrase: "${target}"
+Return JSON exactly:
+{"word":"...","region":"..","explanation":"...","sentence":"..."}
+Rules:
+- "word" MUST be the dictionary/base form of the TARGET (or exactly TARGET if already standard).
+- "region": 2-letter code or "--".
+- "explanation": clear, simple (Vocabulary.com style).
+- "sentence": natural example using the word.
+- Do NOT substitute a different word than the TARGET/base form.
+`;
+
+  const start = t0();
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-5-nano",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+    agent: keepAliveAgent
+  });
+
+  const dur = ms(start);
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => "");
+    throw new Error(`OpenAI ${resp.status} in ${dur}ms: ${body}`);
+  }
+  const json = await resp.json();
+  const text = json?.choices?.[0]?.message?.content ?? "";
+  dbg(`OpenAI chat OK in ${dur}ms (chars=${text.length})`);
+  return text;
+}
+
+// ---------- TTS ----------
+async function generateAndCacheAudio({ key, text, voice = "nova" }) {
+  if (!text) return;
+  const cachePath = audioCachePathByKey(key);
+  if (fs.existsSync(cachePath)) return;
+
+  if (outgoingTTSRequests.has(key)) return outgoingTTSRequests.get(key);
+  dbg(`TTS start: '${text.slice(0, 40)}...'`);
+  const start = t0();
+  const promise = (async () => {
+    try {
+      const r = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "gpt-4o-mini-tts", input: text, voice }),
+        agent: keepAliveAgent
+      });
+      if (!r.ok || !r.body) throw new Error(`TTS failed: ${r.status} ${r.statusText}`);
+      await new Promise((resolve, reject) => {
+        const dest = fs.createWriteStream(cachePath);
+        r.body.pipe(dest);
+        r.body.on("error", reject);
+        dest.on("finish", resolve);
+        dest.on("error", reject);
+      });
+      dbg(`TTS done in ${ms(start)}ms -> ${cachePath}`);
+    } catch (e) {
+      err("TTS error:", e.message);
+      throw e;
+    } finally {
+      outgoingTTSRequests.delete(key);
+    }
+  })();
+  outgoingTTSRequests.set(key, promise);
+  return promise;
+}
+
+function invalidateExplanationAndSample(word, voice = "nova") {
+  const w = String(word || "").trim().toLowerCase();
+  for (const t of ["explanation", "sample"]) {
+    const key = audioKey(w, t, voice);
+    const p = audioCachePathByKey(key);
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        dbg(`Audio cache invalidated: ${key}`);
+      }
+    } catch (e) {
+      warn(`Audio cache remove failed: ${p} -> ${e.message}`);
+    }
+  }
+}
+
+// ---------- word fetch (stateless; cache by INPUT) ----------
+async function getOrFetchWordData(input, { nocache = false } = {}) {
+  const target = String(input || "").trim().toLowerCase();
+  if (!target) throw new Error("Empty input");
+
+  const cachePath = textCachePath(target);
+  if (!nocache && fs.existsSync(cachePath)) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+      dbg(`Text-cache HIT for '${target}'`);
+      return cached;
+    } catch {
+      warn(`Text-cache CORRUPT for '${target}' -> ignoring`);
+    }
+  } else {
+    dbg(`Text-cache MISS for '${target}' (nocache=${!!nocache})`);
+  }
+
+  // Hit OpenAI (stateless)
+  let word = "", region = "", explanation = "", sentence = "";
+  try {
+    const raw = await openaiChatJSON(target);
+    try {
+      const ai = JSON.parse(raw);
+      word = String(ai.word || target);
+      region = String(ai.region || "--");
+      explanation = String(ai.explanation || "");
+      sentence = String(ai.sentence || "");
+    } catch (parseErr) {
+      warn("Model JSON parse failed, falling back with raw:", raw);
+      word = target;
+      region = "--";
+      explanation = "Model returned unparsable output.";
+      sentence = "";
+    }
+  } catch (e) {
+    err("OpenAI chat error:", e.message);
+    throw e;
+  }
+
+  // Guard: don't let model substitute unrelated lemmas
+  const acceptable =
+    word.toLowerCase() === target ||
+    (!/\s/.test(target) && Math.abs(word.length - target.length) <= 3);
+  if (!acceptable) {
+    dbg(`Guard adjusted word from '${word}' -> '${target}'`);
+    word = target;
+  }
+
+  const payload = { word, region, explanation, sentence };
+  try {
+    fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
+    dbg(`Text-cache WRITE for '${target}' -> ${cachePath}`);
+  } catch (e) {
+    warn(`Text-cache write failed: ${e.message}`);
+  }
+  return payload;
+}
+
+// ---------- express ----------
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "keyboard cat",
+    resave: false,
+    saveUninitialized: true,
+    cookie: { maxAge: 3600 * 1000 },
+  })
+);
+app.use(express.json({ limit: "1mb" }));
+app.use(express.static("public"));
+
+// ---------- audio ----------
+async function ensureAndStreamAudio({ wordInput, typeInput = "word" }, res) {
+  if (!wordInput || typeof wordInput !== "string" || wordInput.length > 64)
+    return res.status(400).end("Invalid word");
+
+  const word = wordInput.trim().toLowerCase();
+  const type = String(typeInput).trim().toLowerCase();
+  if (!["word", "explanation", "sample"].includes(type))
+    return res.status(400).end("Invalid type");
+
+  const voice = "nova";
+  const key = audioKey(word, type, voice);
+  const cachePath = audioCachePathByKey(key);
+
+  if (fs.existsSync(cachePath)) {
+    dbg(`Audio-cache HIT: ${key}`);
+    res.setHeader("Content-Type", "audio/mpeg");
+    return fs.createReadStream(cachePath).pipe(res);
+  }
+
+  dbg(`Audio-cache MISS: ${key}`);
+  let textToSpeak = word;
+  if (type !== "word") {
+    try {
+      const data = await getOrFetchWordData(word);
+      textToSpeak = type === "explanation" ? (data.explanation || word) : (data.sentence || word);
+    } catch {
+      return res.status(503).end("Definition unavailable");
+    }
+  }
+
+  try {
+    await generateAndCacheAudio({ key, text: textToSpeak, voice });
+  } catch {
+    return res.status(500).end("Audio generation failed");
+  }
+
+  if (fs.existsSync(cachePath)) {
+    res.setHeader("Content-Type", "audio/mpeg");
+    fs.createReadStream(cachePath).pipe(res);
+  } else {
+    res.status(500).end("Audio still not available");
+  }
+}
+
+// ---------- routes ----------
+app.post("/api/audio", async (req, res) => {
+  dbg(`POST /api/audio word='${req.body?.word}' type='${req.body?.type}'`);
+  return ensureAndStreamAudio(
+    { wordInput: req.body?.word, typeInput: req.body?.type },
+    res
+  );
+});
+
+app.get("/api/audio/stream", async (req, res) => {
+  dbg(`GET /api/audio/stream word='${req.query?.word}' type='${req.query?.type}'`);
+  return ensureAndStreamAudio(
+    { wordInput: req.query?.word, typeInput: req.query?.type },
+    res
+  );
+});
+
+app.post("/api/define", async (req, res) => {
+  const { word, nocache } = req.body || {};
+  dbg(`POST /api/define session=${req.sessionID} word='${word}' nocache=${!!nocache}`);
+  if (!req.session) return res.status(403).json({ error: "No session" });
+  if (!word || typeof word !== "string" || word.length > 64)
+    return res.status(400).json({ error: "Invalid word" });
+
+  const start = t0();
+  try {
+    const result = await getOrFetchWordData(word, { nocache: !!nocache });
+    dbg(`DEFINE OK '${word}' ->`, result);
+    res.json(result);
+    if (nocache) invalidateExplanationAndSample(result.word);
+    // warm the word audio
+    generateAndCacheAudio({ key: audioKey(result.word, "word"), text: result.word })
+      .catch((e) => warn("Warm audio failed:", e.message));
+  } catch (e) {
+    err(`DEFINE FAIL '${word}' in ${ms(start)}ms:`, e.message);
+    res.status(504).json({ error: "OpenAI API failed" });
+  }
+});
+
+app.post("/lookup", async (req, res) => {
+  const { word } = req.body || {};
+  dbg(`POST /lookup session=${req.sessionID} word='${word}'`);
+  if (!word || typeof word !== "string" || word.length > 64)
+    return res.status(400).json({ error: "Invalid word" });
+  try {
+    const r = await getOrFetchWordData(word);
+    res.json({ word: r.word, region: r.region, explanation: r.explanation, sample_sentence: r.sentence });
+  } catch (e) {
+    err("LOOKUP fail:", e.message);
+    res.status(504).json({ error: "OpenAI API failed" });
+  }
+});
+
+// lifecycle no-ops (keep frontend behavior)
+app.post("/api/prewarm", async (req, res) => { dbg("prewarm (stateless)"); res.json({ ok: true }); });
+app.post("/api/cooldown", async (req, res) => { dbg("cooldown (stateless)"); res.json({ ok: true }); });
+
+// ---------- SSR / static ----------
+if (isProd) {
+  app.use((req, res, next) => {
+    if (req.path === "/" || req.path.endsWith(".html")) return next();
+    return express.static(path.join(__dirname, "dist/client"))(req, res, next);
+  });
+  app.get("/", (_req, res) => {
+    dbg("GET / (prod)");
+    const template = fs.readFileSync(path.join(__dirname, "dist/client/index.html"), "utf-8");
+    const appHtml = "<!-- ssr disabled in compact server -->";
+    const html = template.replace("<!--ssr-outlet-->", appHtml);
+    res.status(200).set({ "Content-Type": "text/html" }).end(html);
+  });
+} else {
+  const { createServer: createViteServer } = await import("vite");
+  const vite = await createViteServer({ server: { middlewareMode: true }, appType: "custom" });
+  app.use(vite.middlewares);
+  app.get("/", async (req, res, next) => {
+    dbg("GET / (dev)");
+    try {
+      const template = await vite.transformIndexHtml(
+        req.originalUrl,
+        fs.readFileSync(path.join(__dirname, "index.html"), "utf-8")
+      );
+      const appHtml = "<!-- dev ssr disabled in compact server -->";
+      const html = template.replace("<!--ssr-outlet-->", appHtml);
+      res.status(200).set({ "Content-Type": "text/html" }).end(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+}
+
+// ---------- 404 + error handler ----------
+app.use((req, res) => {
+  dbg(`404 ${req.method} ${req.originalUrl}`);
+  res.status(404).send("Not Found");
+});
+
+app.use((e, _req, res, _next) => {
+  err("UNCAUGHT:", e.stack || e.message);
+  res.status(500).json({ error: "Internal Server Error" });
+});
+
+const listen_host = "localhost";
+app.listen(port, listen_host, () => {
+  dbg(`== Server on http://${listen_host}:${port} (stateless gpt-5-nano + keep-alive) ==`);
+});
