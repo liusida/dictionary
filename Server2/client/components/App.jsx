@@ -1,15 +1,34 @@
 import { useState, useRef, useEffect } from "react";
 import CountryFlag from "react-country-flag";
 
-function AudioIcon({ playing }) {
+function AudioIcon({ status }) {
+    const playing = status === "playing";
+    const loading = status === "loading";
     return (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#A0AEC0" strokeWidth="2" />
-            <path
-                d="M8 10v4h2l3 3V7l-3 3H8z"
-                fill={playing ? "#f59e42" : "#A0AEC0"}
-            />
-        </svg>
+        <div className="relative">
+            <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                className={loading ? "animate-spin-slow" : ""}
+            >
+                <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="#A0AEC0"
+                    strokeWidth="2"
+                />
+                <path
+                    d="M8 10v4h2l3 3V7l-3 3H8z"
+                    fill={playing ? "#f59e42" : "#A0AEC0"}
+                />
+            </svg>
+            {loading && (
+                <span className="absolute inset-0 rounded-full ring-2 ring-orange-300 animate-ping" />
+            )}
+        </div>
     );
 }
 
@@ -67,43 +86,48 @@ function splitWordsAndSeparators(text) {
 
 const MAX_HISTORY = 256;
 
+// helper for per-button status
+const makeAudioKey = (idx, field) => `${idx}:${field}`;
+
 export default function App() {
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [history, setHistory] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(-1);
-    const [playing, setPlaying] = useState({});
     const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+
+    // { [key]: 'loading' | 'playing' } – absence means 'idle'
+    const [audioStatus, setAudioStatus] = useState({});
     const inputRef = useRef(null);
     const currentAudioRef = useRef(null);
 
+    const setKeyStatus = (key, status) =>
+        setAudioStatus((s) => ({ ...s, [key]: status }));
+    const clearKeyStatus = (key) =>
+        setAudioStatus((s) => {
+            const { [key]: _, ...rest } = s;
+            return rest;
+        });
+
     useEffect(() => {
-        const prewarm = () =>
-            navigator.sendBeacon("/api/prewarm");
+        const prewarm = () => navigator.sendBeacon("/api/prewarm");
+        const cooldown = () => navigator.sendBeacon("/api/cooldown");
 
-        const cooldown = () => 
-            navigator.sendBeacon("/api/cooldown");
-
-        // Open on focus (keeps your existing behavior)
         prewarm();
-        window.addEventListener("pageshow", prewarm); // fires on F5 and BFCache restore
-        window.addEventListener("focus", prewarm); // re-focus on the window
+        window.addEventListener("pageshow", prewarm);
+        window.addEventListener("focus", prewarm);
 
-        // Fire when tab is hidden (switch tab, close tab, app background on mobile)
         const onVisibility = () => {
             if (document.visibilityState === "hidden") cooldown();
             if (document.visibilityState === "visible") prewarm();
         };
         document.addEventListener("visibilitychange", onVisibility);
-
-        // Fire on unload/back-forward cache transitions
         window.addEventListener("pagehide", cooldown);
 
         return () => {
             window.removeEventListener("pageshow", prewarm);
             window.removeEventListener("focus", prewarm);
-            document.removeEventListener("visibilitychange", prewarm);
-            document.removeEventListener("visibilitychange", cooldown);
+            document.removeEventListener("visibilitychange", onVisibility);
             window.removeEventListener("pagehide", cooldown);
         };
     }, []);
@@ -136,9 +160,15 @@ export default function App() {
         idx,
         field /* 'word' | 'explanation' | 'sentence' */
     ) => {
-        setPlaying({ field, idx });
+        const key = makeAudioKey(idx, field);
+        // Lock only this specific icon while busy
+        if (audioStatus[key] === "loading" || audioStatus[key] === "playing")
+            return;
+
         // Map UI field name to server "type"
         const type = field === "sentence" ? "sample" : field; // server expects: word | explanation | sample
+        setKeyStatus(key, "loading");
+
         try {
             const res = await fetch("/api/audio", {
                 method: "POST",
@@ -157,23 +187,23 @@ export default function App() {
             currentAudioRef.current = audio;
 
             audio.onended = () => {
-                setPlaying({});
+                clearKeyStatus(key);
                 URL.revokeObjectURL(url);
             };
             audio.onerror = () => {
-                setPlaying({});
+                clearKeyStatus(key);
                 URL.revokeObjectURL(url);
             };
 
+            setKeyStatus(key, "playing");
             audio.play();
         } catch {
-            setPlaying({});
+            clearKeyStatus(key);
             alert("Audio not available yet. Please try again soon.");
         }
     };
 
     function handleWordClick(word) {
-        // if (!word || !/^\w+$/.test(word)) return;
         setInput(word);
         inputRef.current?.focus();
     }
@@ -274,6 +304,12 @@ export default function App() {
 
     return (
         <div className="bg-transparent min-h-screen p-6 font-serif">
+            {/* local CSS for slow spin */}
+            <style>{`
+                .animate-spin-slow { animation: spin 1.2s linear infinite; }
+                @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+            `}</style>
+
             <form className="flex gap-2 mb-5" onSubmit={handleSubmit}>
                 <input
                     ref={inputRef}
@@ -299,26 +335,33 @@ export default function App() {
                         <span className="text-2xl font-bold text-blue-900">
                             {wordData.word}
                         </span>
-                        <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.word,
-                                    currentIdx,
-                                    "word"
-                                )
-                            }
-                            className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
-                            type="button"
-                            aria-label="Play word"
-                            tabIndex={0}
-                        >
-                            <AudioIcon
-                                playing={
-                                    playing.field === "word" &&
-                                    playing.idx === currentIdx
-                                }
-                            />
-                        </button>
+
+                        {/* WORD audio */}
+                        {(() => {
+                            const key = makeAudioKey(currentIdx, "word");
+                            const status = audioStatus[key];
+                            const disabled =
+                                status === "loading" || status === "playing";
+                            return (
+                                <button
+                                    onClick={() =>
+                                        handleAudioPlay(
+                                            wordData.word,
+                                            currentIdx,
+                                            "word"
+                                        )
+                                    }
+                                    className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    type="button"
+                                    aria-label="Play word"
+                                    tabIndex={0}
+                                    disabled={disabled}
+                                >
+                                    <AudioIcon status={status} />
+                                </button>
+                            );
+                        })()}
+
                         {wordData.region !== "--" &&
                             wordData.region.length == 2 && (
                                 <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
@@ -355,33 +398,38 @@ export default function App() {
                                     )
                             )}
                         </span>
-                        <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.word,
-                                    currentIdx,
-                                    "explanation"
-                                )
-                            }
-                            className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50"
-                            type="button"
-                            aria-label="Play explanation"
-                            tabIndex={0}
-                        >
-                            <AudioIcon
-                                playing={
-                                    playing.field === "explanation" &&
-                                    playing.idx === currentIdx
-                                }
-                            />
-                        </button>
+
+                        {/* EXPLANATION audio */}
+                        {(() => {
+                            const key = makeAudioKey(currentIdx, "explanation");
+                            const status = audioStatus[key];
+                            const disabled =
+                                status === "loading" || status === "playing";
+                            return (
+                                <button
+                                    onClick={() =>
+                                        handleAudioPlay(
+                                            wordData.word,
+                                            currentIdx,
+                                            "explanation"
+                                        )
+                                    }
+                                    className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    type="button"
+                                    aria-label="Play explanation"
+                                    tabIndex={0}
+                                    disabled={disabled}
+                                >
+                                    <AudioIcon status={status} />
+                                </button>
+                            );
+                        })()}
                     </div>
 
                     <div className="italic text-gray-600 flex items-center">
                         <span>
                             {splitWordsAndSeparators(wordData.sentence).map(
                                 (part, i) => {
-                                    // Highlight target word as before
                                     if (
                                         part.toLowerCase() ===
                                         wordData.word.toLowerCase()
@@ -419,29 +467,36 @@ export default function App() {
                                 }
                             )}
                         </span>
-                        <button
-                            onClick={() =>
-                                handleAudioPlay(
-                                    wordData.word,
-                                    currentIdx,
-                                    "sentence"
-                                )
-                            }
-                            className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border border-slate-300 bg-white hover:bg-orange-50"
-                            type="button"
-                            aria-label="Play sentence"
-                            tabIndex={0}
-                        >
-                            <AudioIcon
-                                playing={
-                                    playing.field === "sentence" &&
-                                    playing.idx === currentIdx
-                                }
-                            />
-                        </button>
+
+                        {/* SENTENCE audio */}
+                        {(() => {
+                            const key = makeAudioKey(currentIdx, "sentence");
+                            const status = audioStatus[key];
+                            const disabled =
+                                status === "loading" || status === "playing";
+                            return (
+                                <button
+                                    onClick={() =>
+                                        handleAudioPlay(
+                                            wordData.word,
+                                            currentIdx,
+                                            "sentence"
+                                        )
+                                    }
+                                    className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    type="button"
+                                    aria-label="Play sentence"
+                                    tabIndex={0}
+                                    disabled={disabled}
+                                >
+                                    <AudioIcon status={status} />
+                                </button>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
+
             <button
                 onClick={() => setShowHistoryPanel((v) => !v)}
                 className="flex items-center justify-center bg-white hover:bg-blue-50 mb-2 mt-8 transition"
@@ -449,6 +504,7 @@ export default function App() {
             >
                 <ChevronIcon open={showHistoryPanel} />
             </button>
+
             {showHistoryPanel && (
                 <div className="bg-gray-50 rounded-lg p-3 mt-1 mb-2 text-sm animate-fade-in">
                     {history.length > 1 && (
