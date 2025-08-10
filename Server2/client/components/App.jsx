@@ -123,12 +123,15 @@ export default function App() {
         };
         document.addEventListener("visibilitychange", onVisibility);
         window.addEventListener("pagehide", cooldown);
+        window.addEventListener("unload", cooldown);
+        // window.addEventListener("pagehide", cooldown);
 
         return () => {
             window.removeEventListener("pageshow", prewarm);
             window.removeEventListener("focus", prewarm);
             document.removeEventListener("visibilitychange", onVisibility);
             window.removeEventListener("pagehide", cooldown);
+            window.removeEventListener("unload", cooldown);
         };
     }, []);
 
