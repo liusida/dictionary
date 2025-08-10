@@ -95,6 +95,7 @@ export default function App() {
     const [history, setHistory] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(-1);
     const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+    const [regenCooldown, setRegenCooldown] = useState(false);
 
     // { [key]: 'loading' | 'playing' } – absence means 'idle'
     const [audioStatus, setAudioStatus] = useState({});
@@ -273,7 +274,11 @@ export default function App() {
     }
 
     async function handleRegenerate() {
-        if (currentIdx < 0 || !history[currentIdx]) return;
+        if (regenCooldown || currentIdx < 0 || !history[currentIdx]) return;
+
+        setRegenCooldown(true);
+        setTimeout(() => setRegenCooldown(false), 5000);
+
         const word = history[currentIdx].word;
         setLoading(true);
         try {
@@ -285,7 +290,6 @@ export default function App() {
             if (!resp.ok) throw new Error("API error");
             const data = await resp.json();
 
-            // Replace the current entry with new data
             const newEntry = {
                 word: data.word,
                 region: data.region,
@@ -553,7 +557,7 @@ export default function App() {
                                     onClick={handleRegenerate}
                                     className="w-fit mt-1 px-2 py-0 rounded border border-orange-400 text-orange-400 bg-white text-xs hover:bg-orange-50 ml-2"
                                     type="button"
-                                    disabled={currentIdx < 0 || loading}
+                                    disabled={currentIdx < 0 || loading || regenCooldown}
                                 >
                                     Regenerate
                                 </button>
