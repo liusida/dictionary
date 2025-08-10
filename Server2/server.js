@@ -329,7 +329,8 @@ async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
 
   // 2) Otherwise, call OpenAI via realtime WS
   const prompt = `
-Okay, now, explain this word/phrase "${trimmed}" in JSON format:
+Okay, forget all previous context in our conversation, we are turning to a new word.
+Now, explain this word/phrase "${trimmed}" in JSON format:
 {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}
 Requirement:
   - "word": The dictionary or base form of the word (e.g., "go" for "went", "child" for "children", or same as "word" if already standard).
