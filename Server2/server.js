@@ -329,7 +329,7 @@ async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
 
   // 2) Otherwise, call OpenAI via realtime WS
   const prompt = `
-Okay, forget all previous context in our conversation, we are turning to a new word.
+Okay, forget all previous words in our conversation, if any. We are now turning to a new word.
 Now, explain this word/phrase "${trimmed}" in JSON format:
 {"word": "...", "region": "..", "explanation": "...", "sentence": "..."}
 Requirement:
