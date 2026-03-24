@@ -281,7 +281,7 @@ export default function App() {
     const wordData = currentIdx >= 0 ? history[currentIdx] : null;
 
     return (
-        <div className="dict-app bg-[var(--dict-page)] min-h-screen p-6 font-serif text-[var(--dict-ink)]">
+        <div className="dict-app bg-[var(--dict-page)] min-h-screen flex flex-col p-6 font-serif text-[var(--dict-ink)]">
             <style>{`
                 .dict-app {
                     --dict-page: #f8fafc;
@@ -336,6 +336,7 @@ export default function App() {
                 }
             `}</style>
 
+            <div className="flex-shrink-0 w-full">
             <form className="flex gap-2 mb-5" onSubmit={handleSubmit}>
                 <div
                     className="relative flex-1 min-w-0 rounded-md border bg-white overflow-hidden shadow-sm"
@@ -553,18 +554,21 @@ export default function App() {
                     </div>
                 </div>
             )}
+            </div>
 
+            <footer className="mt-auto w-full flex flex-col items-center pt-6 border-t shrink-0" style={{ borderColor: "var(--dict-border)" }}>
             <button
                 onClick={() => setShowHistoryPanel((v) => !v)}
-                className="flex items-center justify-center bg-white mb-2 mt-8 transition-colors rounded-md hover:bg-[var(--dict-accent-soft)]"
+                className="flex items-center justify-center bg-white mb-2 transition-colors rounded-md hover:bg-[var(--dict-accent-soft)]"
                 aria-label="Show more controls"
+                type="button"
             >
                 <ChevronIcon open={showHistoryPanel} />
             </button>
 
             {showHistoryPanel && (
                 <div
-                    className="rounded-lg p-3 mt-1 mb-2 text-sm animate-fade-in border"
+                    className="w-full max-w-lg mx-auto rounded-lg p-3 mb-1 text-sm animate-fade-in border"
                     style={{
                         backgroundColor: "var(--dict-accent-soft)",
                         borderColor: "var(--dict-border)",
@@ -572,7 +576,7 @@ export default function App() {
                     }}
                 >
                     {history.length > 1 && (
-                        <div className="flex gap-2 mt-4 items-center justify-center">
+                        <div className="flex gap-2 mt-1 items-center justify-center">
                             <button
                                 onClick={() =>
                                     setCurrentIdx((idx) => Math.max(0, idx - 1))
@@ -629,6 +633,7 @@ export default function App() {
                     )}
                 </div>
             )}
+            </footer>
         </div>
     );
 }
