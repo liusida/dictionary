@@ -1,0 +1,23 @@
+# Smoke test: SSH to the server and list directories. No deploy, no git reset.
+# Run manually: Actions → "Deploy Server2 (SSH smoke test)" → Run workflow.
+name: Deploy Server2 (SSH smoke test)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ssh-ls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remote ls
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            whoami
+            pwd
+            ls -la "$HOME"
+            ls -la "$HOME/web2"
