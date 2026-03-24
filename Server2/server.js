@@ -72,11 +72,12 @@ function audioCachePathByKey(key) {
 function connectWebSocket(sessionID) {
   log.info(`Connect websocket for session ${sessionID}.`);
   const ws = new WebSocket(
-    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
+    //"wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
+    "wss://api.openai.com/v1/realtime?model=gpt-realtime",
     {
       headers: {
         Authorization: "Bearer " + apiKey,
-        "OpenAI-Beta": "realtime=v1",
+        //"OpenAI-Beta": "realtime=v1",
       },
     }
   );
@@ -151,6 +152,11 @@ function handleWebSocketMessage(message, ws) {
     return;
   }
 
+  // // Temporary: log event types to debug protocol mismatches
+  // try {
+  //   log.info("WS event type:", data.type);
+  // } catch {}
+
   if (data.type === "error") {
     if (data.error?.code === "session_expired") {
       // we could re-establish here if desired
@@ -175,26 +181,61 @@ function handleWebSocketMessage(message, ws) {
     }
   }
 
-  if (data.type === "response.text.done") {
-    const { response_id, text } = data;
+  if (
+    data.type === "response.text.done" ||
+    data.type === "response.output_text.done" ||
+    data.type === "response.output_audio_transcript.done"
+  ) {
+    // For transcript events, the text lives in `data.transcript`
+    const response_id = data.response_id;
+    const text = data.text ?? data.transcript;
     const ctx = pendingResponses.get(response_id);
     if (!ctx) {
       log.warn("No pending context for response", response_id);
       return;
     }
-    let word = "", region = "", explanation = "", sentence = "";
+
+    let word = ctx.word || "";
+    let region = "--";
+    let explanation = "";
+    let sentence = "";
+
+    // Try to parse strict JSON first; if that fails, try to extract
+    // the first {...} block from the string and parse that.
+    const tryParseJson = (raw) => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        const start = raw.indexOf("{");
+        const end = raw.lastIndexOf("}");
+        if (start !== -1 && end > start) {
+          const inner = raw.slice(start, end + 1);
+          return JSON.parse(inner);
+        }
+        throw new Error("No parsable JSON found in text");
+      }
+    };
+
     try {
-      const ai = JSON.parse(text);
-      word = ai.word || "";
+      const ai = tryParseJson(text);
+      word = ai.word || word;
       region = ai.region || "--";
       explanation = ai.explanation || "";
       sentence = ai.sentence || "";
     } catch (e) {
-      word = "error";
+      // Fallback: treat the whole thing as explanation text for the word
       region = "--";
       explanation = text;
       sentence = "";
     }
+
+    // Ensure we always return a non-empty example sentence so
+    log.warn(`sentence: ${sentence}`);
+    // frontend rendering logic that assumes its presence won't crash.
+    if (!sentence || typeof sentence !== "string" || !sentence.trim()) {
+      sentence = `No example sentence is available yet for "${word}".`;
+    }
+
     const payload = { word, region, explanation, sentence };
     const cachePath = textCachePath(word.trim().toLowerCase());
     fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
@@ -350,7 +391,7 @@ Respond ONLY with the strict JSON object, with NO code block, NO backticks, and 
       JSON.stringify({
         type: "response.create",
         response: {
-          modalities: ["text"],
+          output_modalities: ["text"],
           instructions: prompt,
           metadata: { request_id },
         },
@@ -461,7 +502,9 @@ async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }
   // Serve from cache if present
   if (fs.existsSync(cachePath)) {
     log.info(`Audio-cache hit for key '${key}'`);
+    const stat = fs.statSync(cachePath);
     res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Length", stat.size);
     return fs.createReadStream(cachePath).pipe(res);
   }
 
@@ -487,7 +530,9 @@ async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }
   }
 
   if (fs.existsSync(cachePath)) {
+    const stat = fs.statSync(cachePath);
     res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Length", stat.size);
     fs.createReadStream(cachePath).pipe(res);
   } else {
     res.status(500).end("Audio still not available");
