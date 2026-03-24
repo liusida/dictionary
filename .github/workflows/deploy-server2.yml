@@ -1,23 +1,74 @@
-# Smoke test: SSH to the server and list directories. No deploy, no git reset.
-# Run manually: Actions → "Deploy Server2 (SSH smoke test)" → Run workflow.
-name: Deploy Server2 (SSH smoke test)
+# Deploy Server2/ to ~/web2: rsync from repo, then npm ci + npm run build on the server.
+# Preserves on server (not overwritten/deleted by rsync): .env, node_modules, dist, .vite,
+# audio-cache*, text-cache (see rsync excludes).
+#
+# Secrets: SSH_HOST, SSH_USER, SSH_KEY (required). SSH_PORT optional if not 22 (set on both steps).
+# Optional: DEPLOY_RESTART_CMD e.g. "pm2 restart web2" or "sudo systemctl restart yourunit".
+name: Deploy Server2
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "Server2/**"
+      - ".github/workflows/deploy-server2.yml"
 
 jobs:
-  ssh-ls:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Remote ls
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Add SSH host key
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          PORT="${SSH_PORT:-22}"
+          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Rsync Server2 to ~/web2
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          set -euo pipefail
+          PORT="${SSH_PORT:-22}"
+          # --delete: dest files removed when removed from repo; rsync does not delete excluded paths.
+          rsync -avz --delete \
+            -e "ssh -p ${PORT} -o StrictHostKeyChecking=yes" \
+            --exclude='.env' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='.vite/' \
+            --exclude='audio-cache/' \
+            --exclude='audio-cache-*/' \
+            --exclude='text-cache/' \
+            --exclude='.git/' \
+            Server2/ "${SSH_USER}@${SSH_HOST}:~/web2/"
+
+      - name: Install, build, optional restart
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_RESTART_CMD: ${{ secrets.DEPLOY_RESTART_CMD }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          envs: DEPLOY_RESTART_CMD
           script: |
-            set -e
-            whoami
-            pwd
-            ls -la "$HOME"
-            ls -la "$HOME/web2"
+            set -euo pipefail
+            cd ~/web2
+            npm ci
+            npm run build
+            if [ -n "${DEPLOY_RESTART_CMD:-}" ]; then
+              bash -lc "$DEPLOY_RESTART_CMD"
+            fi
