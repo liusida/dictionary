@@ -5,7 +5,7 @@ function AudioIcon({ status }) {
     const playing = status === "playing";
     const loading = status === "loading";
     return (
-        <div className="relative">
+        <div className="relative text-[var(--dict-icon)]">
             <svg
                 width="24"
                 height="24"
@@ -13,20 +13,14 @@ function AudioIcon({ status }) {
                 fill="none"
                 className={loading ? "animate-spin-slow" : ""}
             >
-                <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="#A0AEC0"
-                    strokeWidth="2"
-                />
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
                 <path
                     d="M8 10v4h2l3 3V7l-3 3H8z"
-                    fill={playing ? "#f59e42" : "#A0AEC0"}
+                    fill={playing ? "var(--dict-accent)" : "currentColor"}
                 />
             </svg>
             {loading && (
-                <span className="absolute inset-0 rounded-full ring-2 ring-orange-300 animate-ping" />
+                <span className="absolute inset-0 rounded-full ring-2 ring-[var(--dict-focus)] animate-ping opacity-60" />
             )}
         </div>
     );
@@ -34,20 +28,20 @@ function AudioIcon({ status }) {
 
 function SearchIcon({ active }) {
     return (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <circle
-                cx="11"
-                cy="11"
-                r="7"
-                stroke={active ? "#f59e42" : "#A0AEC0"}
-                strokeWidth="2"
-            />
+        <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            className={active ? "text-[var(--dict-accent)]" : "text-[var(--dict-icon)]"}
+        >
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
             <line
                 x1="16"
                 y1="16"
                 x2="21"
                 y2="21"
-                stroke={active ? "#f59e42" : "#A0AEC0"}
+                stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
             />
@@ -69,7 +63,7 @@ function ChevronIcon({ open }) {
         >
             <polyline
                 points="6 8 10 12 14 8"
-                stroke={open ? "#f59e42" : "#A0AEC0"}
+                stroke={open ? "var(--dict-accent)" : "var(--dict-icon)"}
                 strokeWidth="2"
                 fill="none"
                 strokeLinecap="round"
@@ -96,6 +90,8 @@ export default function App() {
     const [currentIdx, setCurrentIdx] = useState(-1);
     const [showHistoryPanel, setShowHistoryPanel] = useState(false);
     const [regenCooldown, setRegenCooldown] = useState(false);
+    /** Bumps when a network define/regenerate starts so the input progress animation restarts. */
+    const [progressCycle, setProgressCycle] = useState(0);
 
     // { [key]: 'loading' | 'playing' } – absence means 'idle'
     const [audioStatus, setAudioStatus] = useState({});
@@ -109,32 +105,6 @@ export default function App() {
             const { [key]: _, ...rest } = s;
             return rest;
         });
-
-    useEffect(() => {
-        const prewarm = () => navigator.sendBeacon("/api/prewarm");
-        const cooldown = () => navigator.sendBeacon("/api/cooldown");
-
-        prewarm();
-        window.addEventListener("pageshow", prewarm);
-        window.addEventListener("focus", prewarm);
-
-        const onVisibility = () => {
-            if (document.visibilityState === "hidden") cooldown();
-            if (document.visibilityState === "visible") prewarm();
-        };
-        document.addEventListener("visibilitychange", onVisibility);
-        window.addEventListener("pagehide", cooldown);
-        window.addEventListener("unload", cooldown);
-        // window.addEventListener("pagehide", cooldown);
-
-        return () => {
-            window.removeEventListener("pageshow", prewarm);
-            window.removeEventListener("focus", prewarm);
-            document.removeEventListener("visibilitychange", onVisibility);
-            window.removeEventListener("pagehide", cooldown);
-            window.removeEventListener("unload", cooldown);
-        };
-    }, []);
 
     useEffect(() => {
         setInput("");
@@ -216,7 +186,6 @@ export default function App() {
         e.preventDefault();
         const word = input.trim();
         if (!word) return;
-        setLoading(true);
 
         const existingIdx = history.findIndex(
             (entry) => entry.word.toLowerCase() === word.toLowerCase()
@@ -232,11 +201,12 @@ export default function App() {
             setHistory(newHistory);
             setCurrentIdx(newHistory.length - 1);
             setInput("");
-            setLoading(false);
             inputRef.current?.focus();
             return;
         }
 
+        setLoading(true);
+        setProgressCycle((c) => c + 1);
         try {
             const resp = await fetch("/api/define", {
                 method: "POST",
@@ -281,6 +251,7 @@ export default function App() {
 
         const word = history[currentIdx].word;
         setLoading(true);
+        setProgressCycle((c) => c + 1);
         try {
             const resp = await fetch("/api/define", {
                 method: "POST",
@@ -310,27 +281,89 @@ export default function App() {
     const wordData = currentIdx >= 0 ? history[currentIdx] : null;
 
     return (
-        <div className="bg-transparent min-h-screen p-6 font-serif">
-            {/* local CSS for slow spin */}
+        <div className="dict-app bg-[var(--dict-page)] min-h-screen p-6 font-serif text-[var(--dict-ink)]">
             <style>{`
+                .dict-app {
+                    --dict-page: #f8fafc;
+                    --dict-ink: #1a2d45;
+                    --dict-headline: #1e3a8a;
+                    --dict-ink-muted: #4a6278;
+                    --dict-border: #b9c9d9;
+                    --dict-surface: #e8f0fa;
+                    --dict-surface-highlight: #d8e6f6;
+                    --dict-progress: #c8dcf0;
+                    --dict-accent: #2563eb;
+                    --dict-accent-soft: #dbeafe;
+                    --dict-focus: #93c5fd;
+                    --dict-icon: #64748b;
+                    --dict-danger: #dc2626;
+                    --dict-danger-soft: #fecaca;
+                }
                 .animate-spin-slow { animation: spin 1.2s linear infinite; }
                 @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+                @keyframes inputProgressFill {
+                    from { transform: scaleX(0); }
+                    to { transform: scaleX(1); }
+                }
+                .input-progress-shade {
+                    transform-origin: left center;
+                    animation: inputProgressFill 2s linear forwards;
+                }
+                .dict-submit-btn {
+                    border-color: var(--dict-ink);
+                    color: var(--dict-ink);
+                }
+                .dict-submit-btn:hover:not(:disabled) {
+                    background-color: var(--dict-accent-soft);
+                }
+                .dict-link-word {
+                    cursor: pointer;
+                    color: inherit;
+                    user-select: text;
+                }
+                .dict-link-word:hover {
+                    color: var(--dict-accent);
+                }
+                .dict-btn-danger-outline:hover {
+                    background-color: color-mix(in srgb, var(--dict-danger) 10%, white);
+                }
+                .dict-btn-accent-outline {
+                    border-color: var(--dict-accent);
+                    color: var(--dict-accent);
+                }
+                .dict-btn-accent-outline:hover:not(:disabled) {
+                    background-color: var(--dict-accent-soft);
+                }
             `}</style>
 
             <form className="flex gap-2 mb-5" onSubmit={handleSubmit}>
-                <input
-                    ref={inputRef}
-                    type="text"
-                    placeholder="Enter a word"
-                    value={input}
-                    disabled={loading}
-                    onChange={(e) => setInput(e.target.value)}
-                    className="text-lg px-3 py-2 rounded border border-slate-300 flex-1"
-                />
+                <div
+                    className="relative flex-1 min-w-0 rounded-md border bg-white overflow-hidden shadow-sm"
+                    style={{ borderColor: "var(--dict-border)" }}
+                >
+                    {loading && (
+                        <div
+                            key={progressCycle}
+                            className="input-progress-shade pointer-events-none absolute inset-y-0 left-0 w-full"
+                            style={{ backgroundColor: "var(--dict-progress)" }}
+                            aria-hidden
+                        />
+                    )}
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        placeholder="Enter a word"
+                        value={input}
+                        disabled={loading}
+                        onChange={(e) => setInput(e.target.value)}
+                        className="relative z-10 w-full text-lg px-3 py-2 bg-transparent border-0 outline-none focus:ring-2 focus:ring-[var(--dict-focus)] focus:ring-inset rounded-md placeholder:text-[var(--dict-icon)]"
+                        style={{ color: "var(--dict-ink)" }}
+                    />
+                </div>
                 <button
                     type="submit"
                     disabled={loading}
-                    className="text-lg px-4 py-2 rounded border-2 border-blue-800 text-blue-800 font-medium bg-white hover:bg-blue-50 disabled:opacity-60"
+                    className="dict-submit-btn text-lg px-4 py-2 rounded-md border-2 font-medium bg-white disabled:opacity-60 transition-colors"
                 >
                     <SearchIcon active={loading} />
                 </button>
@@ -339,7 +372,7 @@ export default function App() {
             {wordData && (
                 <div>
                     <div className="flex items-center gap-2 mb-2">
-                        <span className="text-2xl font-bold text-blue-900">
+                        <span className="text-2xl font-bold" style={{ color: "var(--dict-headline)" }}>
                             {wordData.word}
                         </span>
 
@@ -358,7 +391,8 @@ export default function App() {
                                             "word"
                                         )
                                     }
-                                    className="w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    className="w-8 h-8 flex items-center justify-center rounded-full border bg-white disabled:opacity-60 transition-colors hover:bg-[var(--dict-accent-soft)]"
+                                    style={{ borderColor: "var(--dict-border)" }}
                                     type="button"
                                     aria-label="Play word"
                                     tabIndex={0}
@@ -371,7 +405,10 @@ export default function App() {
 
                         {wordData.region !== "--" &&
                             wordData.region.length == 2 && (
-                                <span className="inline-flex items-center justify-center bg-blue-50 rounded px-1 py-0.5 ml-3">
+                                <span
+                                    className="inline-flex items-center justify-center rounded px-1 py-0.5 ml-3"
+                                    style={{ backgroundColor: "var(--dict-accent-soft)" }}
+                                >
                                     <CountryFlag
                                         countryCode={wordData.region}
                                         svg
@@ -384,19 +421,24 @@ export default function App() {
                             )}
                     </div>
 
-                    <div className="bg-blue-100 text-blue-900 rounded px-4 py-3 mb-4 flex justify-between items-start">
+                    <div
+                        className="rounded-lg px-4 py-3 mb-4 flex justify-between items-start"
+                        style={{
+                            backgroundColor: "var(--dict-surface)",
+                            color: "var(--dict-headline)",
+                        }}
+                    >
                         <span>
                             {splitWordsAndSeparators(wordData.explanation).map(
                                 (part, i) =>
                                     !/^[\s.,'";:!?-]+$/.test(part) ? (
                                         <span
                                             key={i}
-                                            className="cursor-pointer hover:text-orange-500"
+                                            className="dict-link-word"
                                             onClick={() =>
                                                 handleWordClick(part)
                                             }
                                             tabIndex={0}
-                                            style={{ userSelect: "text" }}
                                         >
                                             {part}
                                         </span>
@@ -421,7 +463,8 @@ export default function App() {
                                             "explanation"
                                         )
                                     }
-                                    className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    className="ml-3 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full border bg-white disabled:opacity-60 transition-colors hover:bg-[var(--dict-accent-soft)]"
+                                    style={{ borderColor: "var(--dict-border)" }}
                                     type="button"
                                     aria-label="Play explanation"
                                     tabIndex={0}
@@ -433,7 +476,10 @@ export default function App() {
                         })()}
                     </div>
 
-                    <div className="italic text-gray-600 flex items-center">
+                    <div
+                        className="italic flex items-center"
+                        style={{ color: "var(--dict-ink-muted)" }}
+                    >
                         <span>
                             {splitWordsAndSeparators(wordData.sentence).map(
                                 (part, i) => {
@@ -444,12 +490,16 @@ export default function App() {
                                         return (
                                             <span
                                                 key={i}
-                                                className="bg-blue-50 px-1 rounded text-blue-800 font-medium cursor-pointer"
+                                                className="px-1 rounded font-medium dict-link-word"
+                                                style={{
+                                                    backgroundColor:
+                                                        "var(--dict-surface-highlight)",
+                                                    color: "var(--dict-headline)",
+                                                }}
                                                 onClick={() =>
                                                     handleWordClick(part)
                                                 }
                                                 tabIndex={0}
-                                                style={{ userSelect: "text" }}
                                             >
                                                 {part}
                                             </span>
@@ -458,12 +508,11 @@ export default function App() {
                                         return (
                                             <span
                                                 key={i}
-                                                className="cursor-pointer hover:text-orange-500"
+                                                className="dict-link-word"
                                                 onClick={() =>
                                                     handleWordClick(part)
                                                 }
                                                 tabIndex={0}
-                                                style={{ userSelect: "text" }}
                                             >
                                                 {part}
                                             </span>
@@ -490,7 +539,8 @@ export default function App() {
                                             "sentence"
                                         )
                                     }
-                                    className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border border-slate-300 bg-white hover:bg-orange-50 disabled:opacity-60"
+                                    className="ml-2 align-middle flex items-center justify-center w-8 h-8 rounded-full border bg-white disabled:opacity-60 transition-colors hover:bg-[var(--dict-accent-soft)]"
+                                    style={{ borderColor: "var(--dict-border)" }}
                                     type="button"
                                     aria-label="Play sentence"
                                     tabIndex={0}
@@ -506,14 +556,21 @@ export default function App() {
 
             <button
                 onClick={() => setShowHistoryPanel((v) => !v)}
-                className="flex items-center justify-center bg-white hover:bg-blue-50 mb-2 mt-8 transition"
+                className="flex items-center justify-center bg-white mb-2 mt-8 transition-colors rounded-md hover:bg-[var(--dict-accent-soft)]"
                 aria-label="Show more controls"
             >
                 <ChevronIcon open={showHistoryPanel} />
             </button>
 
             {showHistoryPanel && (
-                <div className="bg-gray-50 rounded-lg p-3 mt-1 mb-2 text-sm animate-fade-in">
+                <div
+                    className="rounded-lg p-3 mt-1 mb-2 text-sm animate-fade-in border"
+                    style={{
+                        backgroundColor: "var(--dict-accent-soft)",
+                        borderColor: "var(--dict-border)",
+                        color: "var(--dict-ink)",
+                    }}
+                >
                     {history.length > 1 && (
                         <div className="flex gap-2 mt-4 items-center justify-center">
                             <button
@@ -521,7 +578,8 @@ export default function App() {
                                     setCurrentIdx((idx) => Math.max(0, idx - 1))
                                 }
                                 disabled={currentIdx <= 0}
-                                className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
+                                className="px-3 py-0 rounded border bg-white disabled:opacity-40 text-xs transition-colors hover:bg-[var(--dict-surface)]"
+                                style={{ borderColor: "var(--dict-border)", color: "var(--dict-ink)" }}
                             >
                                 ← Previous
                             </button>
@@ -532,7 +590,8 @@ export default function App() {
                                     )
                                 }
                                 disabled={currentIdx >= history.length - 1}
-                                className="px-3 py-0 rounded border bg-white text-blue-900 disabled:opacity-40 text-xs"
+                                className="px-3 py-0 rounded border bg-white disabled:opacity-40 text-xs transition-colors hover:bg-[var(--dict-surface)]"
+                                style={{ borderColor: "var(--dict-border)", color: "var(--dict-ink)" }}
                             >
                                 Next →
                             </button>
@@ -541,21 +600,25 @@ export default function App() {
 
                     {history.length > 0 && (
                         <div className="flex flex-col gap-1 mt-3 items-center justify-center">
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs opacity-70" style={{ color: "var(--dict-ink-muted)" }}>
                                 Showing {currentIdx + 1} of {history.length}{" "}
                                 words in history
                             </div>
                             <div className="flex">
                                 <button
                                     onClick={handleClearHistory}
-                                    className="w-fit mt-1 px-2 py-0 rounded border border-red-300 text-red-300 bg-white text-xs hover:bg-red-30"
+                                    className="dict-btn-danger-outline w-fit mt-1 px-2 py-0 rounded border bg-white text-xs transition-colors"
+                                    style={{
+                                        borderColor: "var(--dict-danger-soft)",
+                                        color: "var(--dict-danger)",
+                                    }}
                                     type="button"
                                 >
                                     Clear History
                                 </button>
                                 <button
                                     onClick={handleRegenerate}
-                                    className="w-fit mt-1 px-2 py-0 rounded border border-orange-400 text-orange-400 bg-white text-xs hover:bg-orange-50 ml-2"
+                                    className="dict-btn-accent-outline w-fit mt-1 px-2 py-0 rounded border bg-white text-xs ml-2 transition-colors"
                                     type="button"
                                     disabled={currentIdx < 0 || loading || regenCooldown}
                                 >

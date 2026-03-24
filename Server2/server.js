@@ -4,9 +4,9 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import crypto from "crypto";
+import https from "node:https";
 import "dotenv/config";
 import fetch from "node-fetch";
-import WebSocket from "ws";
 
 // =========================================================
 // Environment & App Setup
@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
+const defineModel = process.env.DEFINE_MODEL || "gpt-4o-mini";
 const isProd = process.env.NODE_ENV === "production";
 
 if (!apiKey) {
@@ -24,12 +25,50 @@ if (!apiKey) {
 // ---------------------------------------------------------
 // Global State (logs preserved)
 // ---------------------------------------------------------
-const OpenAIWebsockets = new Map();        // sessionID -> WebSocket
-const pendingRequests = new Map();         // request_id -> { resolve, reject, word }
-const pendingResponses = new Map();        // response_id -> ctx
-const outgoingTTSRequests = new Map();     // audioKey -> inflight Promise
-const BeaconStates = new Map();            // sessionID -> { current, next, running }
-const CooldownTimers = new Map();          // sessionID -> timeout handle for delayed cooldown
+const outgoingTTSRequests = new Map(); // audioKey -> inflight Promise
+
+/** Shared agent so node-fetch reuses TCP/TLS to api.openai.com between requests. */
+const openaiHttpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 64,
+  maxFreeSockets: 10,
+});
+
+/** JSON Schema for Chat Completions structured outputs (strict). */
+const DICTIONARY_ENTRY_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    word: {
+      type: "string",
+      description: "Dictionary or base form (e.g. go for went, child for children).",
+    },
+    region: {
+      type: "string",
+      description: '2-letter region code (e.g. SG) or "--" for global English.',
+    },
+    explanation: {
+      type: "string",
+      description: "Clear Vocabulary.com-style explanation; simple words for basic vocabulary.",
+    },
+    sentence: {
+      type: "string",
+      description: "Natural example sentence using the word.",
+    },
+  },
+  required: ["word", "region", "explanation", "sentence"],
+  additionalProperties: false,
+};
+
+const DEFINE_SYSTEM_PROMPT = `You are a concise English learner's dictionary.
+For the user's target word or phrase, fill every JSON field.
+- word: dictionary or base form.
+- region: 2-letter code where the word is mainly used, or "--" for standard global English.
+- explanation: clear, friendly; simpler vocabulary for basic words.
+- sentence: one natural example using the word.
+Stay on the target only; do not discuss other words or meta commentary.`;
+
+const DEFINE_FETCH_TIMEOUT_MS = 20_000;
 
 // =========================================================
 /** Lightweight logging helpers */
@@ -67,288 +106,82 @@ function audioCachePathByKey(key) {
 }
 
 // =========================================================
-// WebSocket: Connect + Lifecycle
+// Core OpenAI: dictionary definitions (Chat Completions + structured outputs)
 // =========================================================
-function connectWebSocket(sessionID) {
-  log.info(`Connect websocket for session ${sessionID}.`);
-  const ws = new WebSocket(
-    //"wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17",
-    "wss://api.openai.com/v1/realtime?model=gpt-realtime",
-    {
+async function fetchDefinitionStructured(trimmed) {
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+
+  const t0 = performance.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFINE_FETCH_TIMEOUT_MS);
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      agent: openaiHttpsAgent,
+      signal: controller.signal,
       headers: {
-        Authorization: "Bearer " + apiKey,
-        //"OpenAI-Beta": "realtime=v1",
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
-    }
-  );
+      body: JSON.stringify({
+        model: defineModel,
+        messages: [
+          { role: "system", content: DEFINE_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `Target word or phrase (explain only this):\n"${trimmed}"\n\nRespond with the JSON object matching the schema.`,
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "dictionary_entry",
+            strict: true,
+            schema: DICTIONARY_ENTRY_JSON_SCHEMA,
+          },
+        },
+      }),
+    });
 
-  ws.sessionID = sessionID;
-  OpenAIWebsockets.set(sessionID, ws);
-
-  ws.on("open", () => {
-    log.info(`Connected to OpenAI Realtime WebSocket for session ${ws.sessionID}.`);
-  });
-
-  ws.on("error", (err) => {
-    log.error("WebSocket error:", err);
-  });
-
-  ws.on("close", (code, reason) => {
-    log.warn(
-      `WebSocket closed for session ${ws.sessionID}.`,
-      "Code:", code, "Reason:", reason?.toString?.() || String(reason)
-    );
-    OpenAIWebsockets.delete(ws.sessionID);
-    // skip auto-reconnect; /prewarm will handle it
-  });
-
-  ws.on("message", (message) => handleWebSocketMessage(message, ws));
-  return ws;
-}
-
-function waitForOpen(ws, timeoutMs = 5000) {
-  if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const onOpen = () => cleanup(resolve);
-    const onErr = (err) => cleanup(() => reject(err));
-    const onClose = () => cleanup(() => reject(new Error("WS closed before open")));
-    const timer = setTimeout(() => cleanup(() => reject(new Error("WS open timeout"))), timeoutMs);
-
-    function cleanup(cb) {
-      clearTimeout(timer);
-      ws.off("open", onOpen);
-      ws.off("error", onErr);
-      ws.off("close", onClose);
-      cb && cb();
+    const bodyText = await res.text();
+    if (!res.ok) {
+      log.error("Chat completions error:", res.status, bodyText.slice(0, 500));
+      throw new Error(`OpenAI chat completions failed: ${res.status}`);
     }
 
-    ws.once("open", onOpen);
-    ws.once("error", onErr);
-    ws.once("close", onClose);
-  });
-}
-
-async function getOrCreateWebSocket(sessionID, timeoutMs = 5000) {
-  let ws = OpenAIWebsockets.get(sessionID);
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    ws = connectWebSocket(sessionID); // may be CONNECTING
-  }
-  if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
-    ws = connectWebSocket(sessionID);
-  }
-  await waitForOpen(ws, timeoutMs);
-  return ws;
-}
-
-// =========================================================
-// WebSocket: Message Handling
-// =========================================================
-function handleWebSocketMessage(message, ws) {
-  let data;
-  try {
-    data = JSON.parse(message.toString());
-  } catch (err) {
-    log.error("Parsing message error:", err, "\n", message?.toString());
-    return;
-  }
-
-  // // Temporary: log event types to debug protocol mismatches
-  // try {
-  //   log.info("WS event type:", data.type);
-  // } catch {}
-
-  if (data.type === "error") {
-    if (data.error?.code === "session_expired") {
-      // we could re-establish here if desired
-    }
-    log.error(data);
-    ws.close();
-    return;
-  }
-
-  // Map response.id (OpenAI) -> original pending request ctx
-  if (data.type === "response.created" && data.response?.id) {
-    const openaiResponseId = data.response.id;
-    const request_id = data.response.metadata?.request_id;
-    const ctx = pendingRequests.get(request_id);
-    if (ctx) {
-      log.info(`> [${pendingRequests.size}] delete ${request_id} because response has been created '${ctx.word}'`);
-      pendingRequests.delete(request_id);
-      log.info(`>> [${pendingResponses.size}] set ${openaiResponseId} for request ${request_id} '${ctx.word}'`);
-      pendingResponses.set(openaiResponseId, ctx);
-    } else {
-      log.warn("No pending context for request", request_id);
-    }
-  }
-
-  if (
-    data.type === "response.text.done" ||
-    data.type === "response.output_text.done" ||
-    data.type === "response.output_audio_transcript.done"
-  ) {
-    // For transcript events, the text lives in `data.transcript`
-    const response_id = data.response_id;
-    const text = data.text ?? data.transcript;
-    const ctx = pendingResponses.get(response_id);
-    if (!ctx) {
-      log.warn("No pending context for response", response_id);
-      return;
-    }
-
-    let word = ctx.word || "";
-    let region = "--";
-    let explanation = "";
-    let sentence = "";
-
-    // Try to parse strict JSON first; if that fails, try to extract
-    // the first {...} block from the string and parse that.
-    const tryParseJson = (raw) => {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        const start = raw.indexOf("{");
-        const end = raw.lastIndexOf("}");
-        if (start !== -1 && end > start) {
-          const inner = raw.slice(start, end + 1);
-          return JSON.parse(inner);
-        }
-        throw new Error("No parsable JSON found in text");
-      }
-    };
-
+    let data;
     try {
-      const ai = tryParseJson(text);
-      word = ai.word || word;
-      region = ai.region || "--";
-      explanation = ai.explanation || "";
-      sentence = ai.sentence || "";
-    } catch (e) {
-      // Fallback: treat the whole thing as explanation text for the word
-      region = "--";
-      explanation = text;
-      sentence = "";
+      data = JSON.parse(bodyText);
+    } catch {
+      throw new Error("Invalid JSON from OpenAI");
     }
 
-    // Ensure we always return a non-empty example sentence so
-    log.warn(`sentence: ${sentence}`);
-    // frontend rendering logic that assumes its presence won't crash.
-    if (!sentence || typeof sentence !== "string" || !sentence.trim()) {
-      sentence = `No example sentence is available yet for "${word}".`;
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || !content.trim()) {
+      log.error("Unexpected completions shape:", bodyText.slice(0, 400));
+      throw new Error("Empty model content");
     }
 
-    const payload = { word, region, explanation, sentence };
-    const cachePath = textCachePath(word.trim().toLowerCase());
-    fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
-    ctx.resolve && ctx.resolve(payload);
-    ctx.res && ctx.res.json(payload);
-    log.info(`>> [${pendingResponses.size}] delete ${response_id} after processing it.`);
-    pendingResponses.delete(response_id);
-  }
-}
-
-// =========================================================
-// Beacon Queue: currentBeacon + nextBeacon per session
-// With delayed cooldown to prevent open/close flapping
-// =========================================================
-function getBeaconState(sessionID) {
-  let s = BeaconStates.get(sessionID);
-  if (!s) {
-    s = { current: null, next: null, running: false };
-    BeaconStates.set(sessionID, s);
-  }
-  return s;
-}
-
-function scheduleBeacon(sessionID, kind, { cooldownDelayMs = 1500 } = {}) {
-  const s = getBeaconState(sessionID);
-
-  if (kind === "prewarm") {
-    // Cancel any pending delayed cooldown
-    const t = CooldownTimers.get(sessionID);
-    if (t) {
-      clearTimeout(t);
-      CooldownTimers.delete(sessionID);
-      log.info(`[Beacon] Canceled pending cooldown for ${sessionID} due to prewarm.`);
-    }
-    s.next = { kind, ts: Date.now() }; // overwrite next slot
-    processBeacons(sessionID).catch((e) =>
-      log.warn(`Beacon processor error for ${sessionID}:`, e.message)
+    const parsed = JSON.parse(content);
+    const ms = Math.round(performance.now() - t0);
+    log.info(
+      `[define-timing] openai_chat_completions ok=true ms=${ms} word='${trimmed}' model=${defineModel}`
     );
-    return;
-  }
-
-  if (kind === "cooldown") {
-    // Debounce cooldown: schedule after a short delay; a prewarm within the window cancels it
-    const existing = CooldownTimers.get(sessionID);
-    if (existing) clearTimeout(existing);
-
-    const timer = setTimeout(() => {
-      CooldownTimers.delete(sessionID);
-      const st = getBeaconState(sessionID);
-      st.next = { kind: "cooldown", ts: Date.now() };
-      log.info(`[Beacon] Enqueuing delayed cooldown for ${sessionID}.`);
-      processBeacons(sessionID).catch((e) =>
-        log.warn(`Beacon processor error for ${sessionID}:`, e.message)
-      );
-    }, cooldownDelayMs);
-
-    CooldownTimers.set(sessionID, timer);
-    log.info(`[Beacon] Scheduled cooldown in ${cooldownDelayMs}ms for ${sessionID}.`);
-    return;
-  }
-
-  // Fallback/other kinds
-  s.next = { kind, ts: Date.now() };
-  processBeacons(sessionID).catch((e) =>
-    log.warn(`Beacon processor error for ${sessionID}:`, e.message)
-  );
-}
-
-async function processBeacons(sessionID) {
-  const s = getBeaconState(sessionID);
-  if (s.running) return;
-  s.running = true;
-  try {
-    while (true) {
-      if (!s.current) {
-        if (!s.next) break;
-        s.current = s.next;
-        s.next = null;
-      }
-
-      const b = s.current;
-      if (b.kind === "prewarm") {
-        try {
-          await getOrCreateWebSocket(sessionID);
-        } catch (e) {
-          log.warn(`prewarm failed for ${sessionID}:`, e.message);
-        }
-      } else if (b.kind === "cooldown") {
-        const ws = OpenAIWebsockets.get(sessionID);
-        if (ws) {
-          try {
-            ws.close(1000, "cooldown");
-          } catch (err) {
-            log.warn("Cooldown close error:", err.message);
-          }
-          OpenAIWebsockets.delete(sessionID);
-        }
-      } else {
-        log.warn("Unknown beacon kind:", b.kind);
-      }
-
-      // Done with current; allow promotion of any queued next
-      s.current = null;
-    }
+    return parsed;
+  } catch (err) {
+    const ms = Math.round(performance.now() - t0);
+    log.warn(
+      `[define-timing] openai_chat_completions ok=false ms=${ms} word='${trimmed}' model=${defineModel}`,
+      err?.message || err
+    );
+    throw err;
   } finally {
-    s.running = false;
+    clearTimeout(timeout);
   }
 }
 
-// =========================================================
-// Core OpenAI Helpers (definitions + audio)
-// =========================================================
-async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
+async function getOrFetchWordData(word, { nocache = false } = {}) {
   const trimmed = word.trim().toLowerCase();
   const cachePath = textCachePath(trimmed);
 
@@ -358,7 +191,7 @@ async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
       const cached = JSON.parse(fs.readFileSync(cachePath, "utf8"));
       log.info(`Text-cache hit for '${trimmed}'.`);
       return {
-        word: cached.word,
+        word: trimmed,
         region: cached.region || "--",
         explanation: cached.explanation,
         sentence: cached.sentence,
@@ -368,44 +201,21 @@ async function getOrFetchWordData(word, ws, { nocache = false } = {}) {
     }
   }
 
-  // 2) Otherwise, call OpenAI via realtime WS
-  const prompt = `
-Okay, forget all previous words in our conversation, if any. We are now turning to a new word.
-Now, explain this word/phrase "${trimmed}" in JSON format:
-{"word": "...", "region": "..", "explanation": "...", "sentence": "..."}
-Requirement:
-  - "word": The dictionary or base form of the word (e.g., "go" for "went", "child" for "children", or same as "word" if already standard).
-  - "region": A 2-letter code indicating where the word is mostly used (e.g., "SG" for Singapore, or "--" for globally standard English).
-  - "explanation": A clear explanation in the style of Vocabulary.com. Use only simple and familiar words for basic vocabulary, but allow more detailed for the rest.
-  - "sentence": A natural example sentence using the word.
-Respond ONLY with the strict JSON object, with NO code block, NO backticks, and NO extra content—just the raw JSON.`;
+  // 2) Chat Completions + structured outputs
+  log.info(`>>> fetch definition (structured) for '${trimmed}' model=${defineModel}`);
+  const ai = await fetchDefinitionStructured(trimmed);
 
-  const request_id = crypto.randomUUID();
+  let region = typeof ai.region === "string" && ai.region.trim() ? ai.region.trim() : "--";
+  let explanation = typeof ai.explanation === "string" ? ai.explanation : "";
+  let sentence = typeof ai.sentence === "string" ? ai.sentence : "";
 
-  return new Promise((resolve, reject) => {
-    log.info(`> [${pendingRequests.size}] set ${request_id} for word '${trimmed}'`);
-    pendingRequests.set(request_id, { resolve, reject, word: trimmed });
+  if (!sentence.trim()) {
+    sentence = `No example sentence is available yet for "${trimmed}".`;
+  }
 
-    log.info(`>>> send request for '${trimmed}' for session ${ws.sessionID}`);
-    ws.send(
-      JSON.stringify({
-        type: "response.create",
-        response: {
-          output_modalities: ["text"],
-          instructions: prompt,
-          metadata: { request_id },
-        },
-      })
-    );
-
-    setTimeout(() => {
-      if (pendingRequests.has(request_id)) {
-        log.info(`> [${pendingRequests.size}] deleting ${request_id} due to OpenAI timeout`);
-        pendingRequests.delete(request_id);
-        reject(new Error("OpenAI timeout"));
-      }
-    }, 20000);
-  });
+  const payload = { word: trimmed, region, explanation, sentence };
+  fs.writeFileSync(cachePath, JSON.stringify(payload), "utf8");
+  return payload;
 }
 
 async function generateAndCacheAudio({ key, text, voice = "nova" }) {
@@ -420,6 +230,7 @@ async function generateAndCacheAudio({ key, text, voice = "nova" }) {
     try {
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
+        agent: openaiHttpsAgent,
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
@@ -484,7 +295,7 @@ app.use(express.static("public"));
 // =========================================================
 // Express: Shared Audio Handler
 // =========================================================
-async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }, res) {
+async function ensureAndStreamAudio({ wordInput, typeInput = "word" }, res) {
   // Validate
   if (!wordInput || typeof wordInput !== "string" || wordInput.length > 64) {
     return res.status(400).end("Invalid word");
@@ -514,8 +325,7 @@ async function ensureAndStreamAudio({ wordInput, typeInput = "word", sessionID }
     textToSpeak = word;
   } else {
     try {
-      const ws = await getOrCreateWebSocket(sessionID);
-      const data = await getOrFetchWordData(word, ws);
+      const data = await getOrFetchWordData(word);
       textToSpeak = type === "explanation" ? (data.explanation || word) : (data.sentence || word);
     } catch {
       return res.status(503).end("Definition unavailable");
@@ -550,8 +360,7 @@ app.post("/api/define", async (req, res) => {
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
-    const ws = await getOrCreateWebSocket(req.sessionID);
-    const result = await getOrFetchWordData(word, ws, { nocache });
+    const result = await getOrFetchWordData(word, { nocache });
     log.info(`[API] Result for "${word}":`, result);
     res.json(result);
     if (nocache) {
@@ -566,30 +375,23 @@ app.post("/api/define", async (req, res) => {
 
 // --- POST /api/audio (body: { word, type })
 app.post("/api/audio", async (req, res) => {
-  return ensureAndStreamAudio(
-    { wordInput: req.body?.word, typeInput: req.body?.type, sessionID: req.sessionID },
-    res
-  );
+  return ensureAndStreamAudio({ wordInput: req.body?.word, typeInput: req.body?.type }, res);
 });
 
 // --- GET /api/audio/stream?word=&type=
 app.get("/api/audio/stream", async (req, res) => {
-  return ensureAndStreamAudio(
-    { wordInput: req.query?.word, typeInput: req.query?.type, sessionID: req.sessionID },
-    res
-  );
+  return ensureAndStreamAudio({ wordInput: req.query?.word, typeInput: req.query?.type }, res);
 });
 
 // --- /lookup: For IoT devices ---
 app.post("/lookup", async (req, res) => {
   // TODO: still have bug.
   log.info(`/lookup from session ${req.sessionID}`);
-  const ws = await getOrCreateWebSocket(req.sessionID);
   const { word } = req.body || {};
   if (!word || typeof word !== "string" || word.length > 64)
     return res.status(400).json({ error: "Invalid word" });
   try {
-    const result = await getOrFetchWordData(word, ws);
+    const result = await getOrFetchWordData(word);
     res.json({
       word: result.word,
       region: result.region,
@@ -599,23 +401,6 @@ app.post("/lookup", async (req, res) => {
   } catch (e) {
     res.status(504).json({ error: "OpenAI API failed" });
   }
-});
-
-// Beaconized lifecycle endpoints (non-blocking; 202)
-app.post("/api/prewarm", (req, res) => {
-  log.info("prewarm (queued)");
-  scheduleBeacon(req.sessionID, "prewarm");
-  log.info(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
-  res.status(202).json({ ok: true, queued: "prewarm" });
-});
-
-app.post("/api/cooldown", (req, res) => {
-  log.info("cooldown (queued, delayed)");
-  // Optional: allow custom delay via query/body, default 1500ms
-  const delay = Number(req.query?.delay ?? req.body?.delay ?? 5000) || 5000;
-  scheduleBeacon(req.sessionID, "cooldown", { cooldownDelayMs: delay });
-  log.info(`Current OpenAIWebsockets size: ${OpenAIWebsockets.size}`);
-  res.status(202).json({ ok: true, queued: "cooldown", delayMs: delay });
 });
 
 // =========================================================
@@ -629,7 +414,6 @@ if (isProd) {
   });
   app.get("/", async (req, res) => {
     log.info(`Page visit from session: ${req.sessionID}.`);
-    await getOrCreateWebSocket(req.sessionID); // ensure WS ready for the session
     const template = fs.readFileSync(
       path.join(__dirname, "dist/client/index.html"),
       "utf-8"
@@ -651,7 +435,6 @@ if (isProd) {
   app.use(vite.middlewares);
   app.get("/", async (req, res, next) => {
     log.info(`Page visit from session: ${req.sessionID}.`);
-    await getOrCreateWebSocket(req.sessionID); // ensure WS ready for the session
     try {
       const template = await vite.transformIndexHtml(
         req.originalUrl,
