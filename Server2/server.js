@@ -70,6 +70,14 @@ Stay on the target only; do not discuss other words or meta commentary.`;
 
 const DEFINE_FETCH_TIMEOUT_MS = 20_000;
 
+// Product limits, intentionally much lower than OpenAI's 4,096-character API
+// maximum. A dictionary entry should never create minutes of unexpected audio.
+const MAX_TTS_TEXT_LENGTH = {
+  word: 64,
+  explanation: 600,
+  sample: 300,
+};
+
 // =========================================================
 /** Lightweight logging helpers */
 // =========================================================
@@ -218,8 +226,17 @@ async function getOrFetchWordData(word, { nocache = false } = {}) {
   return payload;
 }
 
-async function generateAndCacheAudio({ key, text, voice = "nova" }) {
+async function generateAndCacheAudio({ key, text, type = "word", voice = "nova" }) {
   if (!text) return;
+  const maxLength = MAX_TTS_TEXT_LENGTH[type];
+  if (!maxLength) throw new Error(`Invalid TTS type: ${type}`);
+  if (text.length > maxLength) {
+    log.warn(
+      `TTS request blocked: type=${type} length=${text.length} max=${maxLength} key='${key}'`
+    );
+    throw new Error(`TTS text is too long (${text.length} > ${maxLength})`);
+  }
+
   const cachePath = audioCachePathByKey(key);
   if (fs.existsSync(cachePath)) return;
 
@@ -334,7 +351,7 @@ async function ensureAndStreamAudio({ wordInput, typeInput = "word" }, res) {
 
   // Generate then stream
   try {
-    await generateAndCacheAudio({ key, text: textToSpeak, voice });
+    await generateAndCacheAudio({ key, text: textToSpeak, type, voice });
   } catch {
     return res.status(500).end("Audio generation failed");
   }
@@ -367,7 +384,11 @@ app.post("/api/define", async (req, res) => {
       invalidateExplanationAndSample(result.word);
     }
     // Background audio cache for word
-    generateAndCacheAudio({ key: audioKey(result.word, "word"), text: result.word }).catch(() => { });
+    generateAndCacheAudio({
+      key: audioKey(result.word, "word"),
+      text: result.word,
+      type: "word",
+    }).catch(() => { });
   } catch (e) {
     res.status(504).json({ error: "OpenAI API failed" });
   }
